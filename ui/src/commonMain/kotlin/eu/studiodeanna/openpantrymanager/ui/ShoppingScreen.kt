@@ -2,6 +2,7 @@ package eu.studiodeanna.openpantrymanager.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -39,6 +42,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -70,6 +83,26 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<ShoppingDialog?>(null) }
     var menu by remember { mutableStateOf(false) }
+    val undoState by repository.shoppingUndoState.collectAsState()
+    val snackbars = remember { SnackbarHostState() }
+    val texts = strings
+
+    /** Says what an undo or redo did, replacing the previous message so quick taps don't queue up. */
+    fun say(message: String) {
+        scope.launch {
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(message)
+        }
+    }
+
+    fun undo() = repository.undoShopping()?.let { say(texts.undone(it)) }
+    fun redo() = repository.redoShopping()?.let { say(texts.redone(it)) }
+
+    // Holds the keyboard focus whenever no dialog has it, so Ctrl+Z and Ctrl+Y reach the list.
+    val keys = remember { FocusRequester() }
+    LaunchedEffect(dialog) {
+        if (dialog == null) runCatching { keys.requestFocus() }
+    }
 
     val linked = list != null
     LaunchedEffect(linked) {
@@ -80,6 +113,19 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
     }
 
     Scaffold(
+        modifier = Modifier
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown || !(event.isCtrlPressed || event.isMetaPressed)) return@onKeyEvent false
+                when {
+                    event.key == Key.Z && !event.isShiftPressed -> undo()
+                    event.key == Key.Z || event.key == Key.Y -> redo()
+                    else -> return@onKeyEvent false
+                }
+                true
+            }
+            .focusRequester(keys)
+            .focusable(),
+        snackbarHost = { SnackbarHost(snackbars) },
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -102,6 +148,12 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
                 },
                 actions = {
                     if (list != null) {
+                        IconButton(onClick = { undo() }, enabled = undoState.canUndo) {
+                            Icon(AppIcons.Undo, contentDescription = strings.undo)
+                        }
+                        IconButton(onClick = { redo() }, enabled = undoState.canRedo) {
+                            Icon(AppIcons.Redo, contentDescription = strings.redo)
+                        }
                         IconButton(onClick = { repository.syncNow() }) { Icon(AppIcons.Sync, contentDescription = strings.syncNow) }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(AppIcons.MoreVert, contentDescription = strings.more) }

@@ -39,6 +39,15 @@ the same space is counted rather than listed twice. Ticking food means one of it
 goes down, and the last one takes it out of the pantry. Food expiring within three days, or already
 expired, is listed under **Use soon** at the top.
 
+**Undo and redo**, as in Open Check Lists: the arrows at the top take back this phone's latest edits
+one by one, and make them again (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z on a keyboard); a message says what was
+undone. That covers food, spaces, receipts put away and what the app learned from each, up to the last
+ten edits, while the app is open. Messages about an edit also have an Undo, for that edit while it is
+the latest. An undo is an edit of its own, which syncs like any other; in a shared pantry it takes back
+only what is still as the edit left it, not what another phone has changed since. The shopping list's
+screen has its own undo and redo, for the ticks and additions made there and from the pantry. Search is
+in the menu (Ctrl+F), so that the arrows fit beside the title.
+
 **What the app learns** (`shared/.../memory/Memory.kt`), kept on the device in `memory.json`, and shared
 with the pantry when it is shared:
 

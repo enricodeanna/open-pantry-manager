@@ -76,7 +76,7 @@ fun ReceiptScreen(
     repository: PantryRepository,
     entries: List<ReceiptEntry>,
     onBack: () -> Unit,
-    onSaved: (count: Int, undo: UndoStep) -> Unit,
+    onSaved: (count: Int, undo: UndoStep?) -> Unit,
 ) {
     val doc by repository.pantry.collectAsState()
     val spaces = remember(doc) { doc.visibleSpaces() }

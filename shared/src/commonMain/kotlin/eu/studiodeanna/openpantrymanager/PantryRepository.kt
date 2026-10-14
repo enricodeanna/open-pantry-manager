@@ -1,21 +1,23 @@
 package eu.studiodeanna.openpantrymanager
 
 import eu.studiodeanna.openpantrymanager.checklist.Item
+import eu.studiodeanna.openpantrymanager.checklist.ListAction
+import eu.studiodeanna.openpantrymanager.checklist.ListChange
 import eu.studiodeanna.openpantrymanager.checklist.ListCodec
 import eu.studiodeanna.openpantrymanager.checklist.ListDocument
 import eu.studiodeanna.openpantrymanager.checklist.ListEditor
+import eu.studiodeanna.openpantrymanager.checklist.action
+import eu.studiodeanna.openpantrymanager.checklist.listChangeBetween
 import eu.studiodeanna.openpantrymanager.checklist.merge
 import eu.studiodeanna.openpantrymanager.checklist.pending
 import eu.studiodeanna.openpantrymanager.checklist.pruned
 import eu.studiodeanna.openpantrymanager.checklist.similarItems
 import eu.studiodeanna.openpantrymanager.checklist.visibleSections
 import eu.studiodeanna.openpantrymanager.memory.Food
-import eu.studiodeanna.openpantrymanager.memory.Learned
 import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.changedTo
 import eu.studiodeanna.openpantrymanager.memory.combinedWith
 import eu.studiodeanna.openpantrymanager.memory.complete
-import eu.studiodeanna.openpantrymanager.memory.differencesFrom
 import eu.studiodeanna.openpantrymanager.memory.food
 import eu.studiodeanna.openpantrymanager.memory.moveFor
 import eu.studiodeanna.openpantrymanager.memory.moved
@@ -25,20 +27,27 @@ import eu.studiodeanna.openpantrymanager.memory.placed
 import eu.studiodeanna.openpantrymanager.memory.receiptKey
 import eu.studiodeanna.openpantrymanager.memory.receiptMeans
 import eu.studiodeanna.openpantrymanager.memory.receiptSkips
+import eu.studiodeanna.openpantrymanager.memory.reverted
 import eu.studiodeanna.openpantrymanager.memory.wentOnList
-import eu.studiodeanna.openpantrymanager.memory.withLearned
 import eu.studiodeanna.openpantrymanager.memory.withSpaces
+import eu.studiodeanna.openpantrymanager.model.History
+import eu.studiodeanna.openpantrymanager.model.PantryAction
+import eu.studiodeanna.openpantrymanager.model.PantryChange
 import eu.studiodeanna.openpantrymanager.model.PantryCodec
 import eu.studiodeanna.openpantrymanager.model.PantryDocument
 import eu.studiodeanna.openpantrymanager.model.PantryEditor
 import eu.studiodeanna.openpantrymanager.model.PantryItem
-import eu.studiodeanna.openpantrymanager.model.changedItems
+import eu.studiodeanna.openpantrymanager.model.PantryStep
+import eu.studiodeanna.openpantrymanager.model.UndoState
 import eu.studiodeanna.openpantrymanager.model.compareStamps
 import eu.studiodeanna.openpantrymanager.model.item
 import eu.studiodeanna.openpantrymanager.model.liveItems
 import eu.studiodeanna.openpantrymanager.model.mergeStamped
 import eu.studiodeanna.openpantrymanager.model.nameKey
+import eu.studiodeanna.openpantrymanager.model.pantryChangeBetween
 import eu.studiodeanna.openpantrymanager.model.pruned
+import eu.studiodeanna.openpantrymanager.model.space
+import eu.studiodeanna.openpantrymanager.model.state
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
 import eu.studiodeanna.openpantrymanager.receipt.OcrLine
 import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
@@ -127,14 +136,8 @@ enum class JoinMode {
     Replace,
 }
 
-/**
- * One change to the pantry that the user can take back: the items it touched as they were before,
- * and the things the app learned from it as they were before.
- */
-class UndoStep internal constructor(
-    internal val items: Map<String, PantryItem?>,
-    internal val memory: Map<String, Learned?>,
-)
+/** An edit of the pantry made on this device, which the user can take back. */
+typealias UndoStep = PantryStep
 
 /**
  * The pantry on this device, what the app has learned, and the linked shopping list. Edits are saved
@@ -166,6 +169,16 @@ class PantryRepository(
     /** The spaces folded away on this device. */
     val collapsedSpaces: StateFlow<Set<String>> = _collapsed.asStateFlow()
 
+    private val _undo = MutableStateFlow(UndoState())
+
+    /** Whether this device's edits of the pantry can be undone or redone. */
+    val undoState: StateFlow<UndoState> = _undo.asStateFlow()
+
+    private val _shoppingUndo = MutableStateFlow(UndoState())
+
+    /** Whether this device's edits of the shopping list can be undone or redone. */
+    val shoppingUndoState: StateFlow<UndoState> = _shoppingUndo.asStateFlow()
+
     private val _sharing = MutableStateFlow<PantrySharing?>(null)
 
     /** The shared pantry this device is in; null while the pantry is this device's alone. */
@@ -174,7 +187,16 @@ class PantryRepository(
     private var device = DeviceState("")
     private lateinit var editor: PantryEditor
     private lateinit var listEditor: ListEditor
-    private var lastUndo: UndoStep? = null
+    private var history = History<PantryChange, PantryAction>()
+        set(value) {
+            field = value
+            _undo.value = value.state
+        }
+    private var shoppingHistory = History<ListChange, ListAction>()
+        set(value) {
+            field = value
+            _shoppingUndo.value = value.state
+        }
     private val saveLock = Mutex()
     private val syncLock = Mutex()
     private var pendingSync: Job? = null
@@ -219,16 +241,25 @@ class PantryRepository(
     // Spaces
 
     fun addSpace(name: String): String {
-        val (doc, id) = editor.addSpace(_pantry.value, name)
-        setPantry(doc)
+        var id = ""
+        edit(PantryAction.AddedSpace(name.trim()), { doc -> editor.addSpace(doc, name).also { id = it.second }.first })
         return id
     }
 
-    fun renameSpace(id: String, name: String) = setPantry(editor.renameSpace(_pantry.value, id, name))
+    fun renameSpace(id: String, name: String) {
+        edit(PantryAction.RenamedSpace(name.trim()), { editor.renameSpace(it, id, name) })
+    }
 
-    fun moveSpace(id: String, offset: Int) = setPantry(editor.moveSpace(_pantry.value, id, offset))
+    fun moveSpace(id: String, offset: Int) {
+        val space = _pantry.value.space(id) ?: return
+        edit(PantryAction.MovedSpace(space.name), { editor.moveSpace(it, id, offset) })
+    }
 
-    fun deleteSpace(id: String) = setPantry(editor.deleteSpace(_pantry.value, id))
+    /** Deletes a space and the food in it. Returns what undoes it. */
+    fun deleteSpace(id: String): UndoStep? {
+        val space = _pantry.value.space(id) ?: return null
+        return edit(PantryAction.DeletedSpace(space.name), { editor.deleteSpace(it, id) })
+    }
 
     /** Folds a space away on this device, or opens it. */
     fun setCollapsed(space: String, collapsed: Boolean) = setAllCollapsed(
@@ -244,15 +275,15 @@ class PantryRepository(
     // Food
 
     /** Puts food in a space and learns that it goes there. Returns what undoes it. */
-    fun addItem(name: String, space: String, quantity: Int = 1, expires: LocalDate? = null): UndoStep =
-        edit({ editor.addItem(it, name, space, quantity, expires).first }) {
+    fun addItem(name: String, space: String, quantity: Int = 1, expires: LocalDate? = null): UndoStep? =
+        edit(PantryAction.AddedFood(name.trim()), { editor.addItem(it, name, space, quantity, expires).first }) {
             it.placed(name, space, now(), today(), expires)
         }
 
     /** Changes an item; a new space counts as moving it there. */
     fun editItem(id: String, name: String, quantity: Int, expires: LocalDate?, space: String): UndoStep? {
         val item = _pantry.value.item(id) ?: return null
-        return edit({ doc ->
+        return edit(PantryAction.EditedFood(name.trim()), { doc ->
             val edited = editor.editItem(doc, id, name, quantity, expires)
             if (space != item.space) editor.moveItem(edited, id, space) else edited
         }) { memory ->
@@ -264,42 +295,73 @@ class PantryRepository(
     fun moveItem(id: String, space: String, count: Int = Int.MAX_VALUE): UndoStep? {
         val item = _pantry.value.item(id) ?: return null
         if (item.space == space) return null
-        return edit({ editor.moveItem(it, id, space, count) }) { it.moved(item.name, item.space, space) }
+        return edit(PantryAction.MovedFood(item.name), { editor.moveItem(it, id, space, count) }) {
+            it.moved(item.name, item.space, space)
+        }
     }
 
     /** Takes one of an item. Returns what undoes it, and whether that was the last one. */
-    fun useOne(id: String): Pair<UndoStep, Boolean>? {
+    fun useOne(id: String): Pair<UndoStep?, Boolean>? {
         val item = _pantry.value.item(id) ?: return null
-        return edit({ editor.useOne(it, id) }) to (item.quantity <= 1)
-    }
-
-    /** Takes an item out of the pantry, all of it: it is finished, thrown away, or was added by mistake. */
-    fun removeItem(id: String): UndoStep? {
-        _pantry.value.item(id) ?: return null
-        return edit({ editor.removeItem(it, id) })
+        val last = item.quantity <= 1
+        val action = if (last) PantryAction.Finished(item.name) else PantryAction.UsedOne(item.name)
+        return edit(action, { editor.useOne(it, id) }) to last
     }
 
     /**
-     * Takes back [step], if it is still the latest change: the items and the things learned it changed,
-     * and only those, so that what other devices of a shared pantry did meanwhile stays.
+     * Takes an item out of the pantry, all of it: it is [finished], or thrown away, or was added by
+     * mistake. Returns what undoes it.
      */
-    fun undo(step: UndoStep) {
-        if (step !== lastUndo) return
-        lastUndo = null
-        setPantry(editor.restore(_pantry.value, step.items))
-        if (step.memory.isNotEmpty()) setMemory(_memory.value.withLearned(step.memory, stamp()))
+    fun removeItem(id: String, finished: Boolean = false): UndoStep? {
+        val item = _pantry.value.item(id) ?: return null
+        val action = if (finished) PantryAction.Finished(item.name) else PantryAction.DeletedFood(item.name)
+        return edit(action, { editor.removeItem(it, id) })
     }
 
-    private fun edit(change: (PantryDocument) -> PantryDocument, learn: (Memory) -> Memory = { it }): UndoStep {
+    /**
+     * Takes back this device's latest edit of the pantry, and what the app learned from it, as a new
+     * edit that syncs like any other. What other devices of a shared pantry changed since stays; an edit
+     * they changed entirely is skipped for the one before it. Returns what was undone, or null.
+     */
+    fun undo(): PantryAction? = replay(redo = false)
+
+    /** Makes the latest undone edit again, the way [undo] takes one back. */
+    fun redo(): PantryAction? = replay(redo = true)
+
+    /** Undoes [step] if it is still the latest edit: the Undo of a message about it. */
+    fun undo(step: UndoStep): PantryAction? = if (history.undo.lastOrNull() === step) undo() else null
+
+    private fun replay(redo: Boolean): PantryAction? {
+        while (true) {
+            val step = history.next(redo) ?: return null
+            val doc = _pantry.value
+            val known = _memory.value
+            val reverted = editor.revert(doc, step.change)
+            val learned = known.reverted(step.change.learned, stamp())
+            val back = pantryChangeBetween(doc, reverted, known, learned)
+            history = history.took(redo, back)
+            if (back != null) {
+                setPantry(reverted)
+                setMemory(learned)
+                return step.action
+            }
+        }
+    }
+
+    /**
+     * Makes an edit of the pantry, called [action], and learns from it; it can be undone. Returns what
+     * undoes it; null if it changed nothing, and nothing is saved then.
+     */
+    private fun edit(action: PantryAction, change: (PantryDocument) -> PantryDocument, learn: (Memory) -> Memory = { it }): UndoStep? {
         val before = _pantry.value
         val after = change(before)
         val known = _memory.value
-        val learned = learn(known)
-        val step = UndoStep(changedItems(before, after), known.differencesFrom(learned))
-        lastUndo = step
+        val learned = known.changedTo(learn(known), stamp())
+        val diff = pantryChangeBetween(before, after, known, learned) ?: return null
+        history = history.record(diff, action)
         setPantry(after)
-        learnNow(learned)
-        return step
+        setMemory(learned)
+        return history.undo.last()
     }
 
     /** What the app knows now: [learned], which it became on this device, stamped where it changed. */
@@ -338,10 +400,10 @@ class PantryRepository(
      * that goes, how long it keeps; and that lines left out are not for the pantry. Returns what undoes
      * it, and how many items were put away.
      */
-    fun saveReceipt(entries: List<ReceiptEntry>): Pair<UndoStep, Int> {
+    fun saveReceipt(entries: List<ReceiptEntry>): Pair<UndoStep?, Int> {
         val spaces = liveSpaces()
         val kept = entries.filter { it.include && it.name.isNotBlank() && it.space in spaces }
-        val step = edit({ doc ->
+        val step = edit(PantryAction.PutAway(kept.sumOf { it.quantity }), { doc ->
             kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires).first }
         }) { memory ->
             entries.fold(memory) { m, e ->
@@ -386,6 +448,7 @@ class PantryRepository(
         }
         pendingSync?.cancel()
         val doc = syncWith(remoteFileFor(target, http), ListDocument())
+        shoppingHistory = History()
         _shopping.value = ShoppingList(target, doc, SyncState.Synced(now()))
         saveShoppingDoc()
         saveDevice(device.copy(shoppingLink = target, shoppingSyncedAt = now(), shoppingCollapsed = emptySet()).linkStamped())
@@ -398,6 +461,7 @@ class PantryRepository(
      */
     suspend fun unlinkShoppingList() {
         pendingSync?.cancel()
+        shoppingHistory = History()
         _shopping.value = null
         saveLock.withLock { files.delete(SHOPPING) }
         saveDevice(device.copy(shoppingLink = null, shoppingSyncedAt = null, shoppingCollapsed = emptySet()).linkStamped())
@@ -438,7 +502,7 @@ class PantryRepository(
         doc = listEditor.putOnList(doc, section, text)
         val sectionName = section?.let { id -> doc.sections.firstOrNull { it.id == id }?.name }.orEmpty()
         learnNow(_memory.value.wentOnList(food, text, sectionName))
-        changeShopping(doc)
+        changeShopping(doc, ListAction.AddedItem(text.trim()))
     }
 
     /** Puts [name] on the shopping list in [sublist], as itself; see the other [addToShopping]. */
@@ -469,7 +533,37 @@ class PantryRepository(
         scope.launch { saveDevice(device.copy(shoppingCollapsed = folded)) }
     }
 
-    private fun changeShopping(doc: ListDocument) {
+    /**
+     * Takes back this device's latest edit of the shopping list, as a new edit that syncs like any
+     * other; what others changed since stays. Returns what was undone, or null.
+     */
+    fun undoShopping(): ListAction? = replayShopping(redo = false)
+
+    /** Makes the latest undone edit of the shopping list again. */
+    fun redoShopping(): ListAction? = replayShopping(redo = true)
+
+    private fun replayShopping(redo: Boolean): ListAction? {
+        while (true) {
+            val step = shoppingHistory.next(redo) ?: return null
+            val doc = _shopping.value?.doc ?: return null
+            val reverted = listEditor.revert(doc, step.change)
+            val back = listChangeBetween(doc, reverted)
+            shoppingHistory = shoppingHistory.took(redo, back)
+            if (back != null) {
+                showShopping(reverted)
+                return step.action
+            }
+        }
+    }
+
+    /** An edit of the shopping list made here, which can be undone: called [action], or as what it changed. */
+    private fun changeShopping(doc: ListDocument, action: ListAction? = null) {
+        val change = _shopping.value?.doc?.let { listChangeBetween(it, doc) } ?: return
+        shoppingHistory = shoppingHistory.record(change, action ?: change.action())
+        showShopping(doc)
+    }
+
+    private fun showShopping(doc: ListDocument) {
         _shopping.update { it?.copy(doc = doc) }
         scope.launch { saveShoppingDoc() }
         scheduleSync(syncDelayMillis)
@@ -647,8 +741,8 @@ class PantryRepository(
 
     private suspend fun startSharing(link: ShareLink, shared: SharedPantry) {
         pendingPantrySync?.cancel()
-        // An undo would now take back food that may be another device's.
-        lastUndo = null
+        // Undoing would now take back food that may be another device's.
+        history = History()
         show(shared)
         _sharing.value = PantrySharing(link, SyncState.Synced(now()))
         saveDevice(device.copy(pantryLink = link, pantrySyncedAt = now()))
@@ -666,6 +760,7 @@ class PantryRepository(
             return
         }
         pendingSync?.cancel()
+        shoppingHistory = History()
         saveLock.withLock { files.delete(SHOPPING) }
         _shopping.value = shared.link?.let { ShoppingList(it, ListDocument(), SyncState.Syncing) }
         saveDevice(

@@ -35,6 +35,26 @@ class ListEditor(private val device: String, private val now: () -> Long) {
         return setDone(doc, checked.id, false)
     }
 
+    /**
+     * Takes [change] back as an edit of its own: each section and item it touched returns to how it was
+     * (one it created is deleted), unless it has been changed again since, which is left as it is.
+     */
+    fun revert(doc: ListDocument, change: ListChange): ListDocument {
+        val at = doc.stamp()
+        val sections = change.sections.associateBy { (_, new) -> new.id }
+        val items = change.items.associateBy { (_, new) -> new.id }
+        return doc.copy(
+            sections = doc.sections.map { current ->
+                val (old, new) = sections[current.id] ?: return@map current
+                if (!current.sameAs(new)) current else (old ?: new.copy(deleted = true)).copy(at = at, by = device)
+            },
+            items = doc.items.map { current ->
+                val (old, new) = items[current.id] ?: return@map current
+                if (!current.sameAs(new)) current else (old ?: new.copy(deleted = true)).copy(at = at, by = device)
+            },
+        )
+    }
+
     fun setDone(doc: ListDocument, id: String, done: Boolean): ListDocument {
         val at = doc.stamp()
         return doc.copy(items = doc.items.map { if (it.id == id) it.copy(done = done, at = at, by = device) else it })

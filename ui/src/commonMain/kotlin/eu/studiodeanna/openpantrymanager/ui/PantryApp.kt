@@ -102,7 +102,7 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null) {
                                 scope.launch {
                                     snackbars.currentSnackbarData?.dismiss()
                                     val result = snackbars.showSnackbar(strings.putAway(count), strings.undo, duration = SnackbarDuration.Long)
-                                    if (result == SnackbarResult.ActionPerformed) repository.undo(step)
+                                    if (result == SnackbarResult.ActionPerformed && step != null) repository.undo(step)
                                 }
                             },
                         )

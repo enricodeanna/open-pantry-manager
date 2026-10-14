@@ -6,6 +6,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import eu.studiodeanna.openpantrymanager.EnglishMessages
 import eu.studiodeanna.openpantrymanager.ItalianMessages
 import eu.studiodeanna.openpantrymanager.Messages
+import eu.studiodeanna.openpantrymanager.checklist.ListAction
+import eu.studiodeanna.openpantrymanager.model.PantryAction
 
 /** The UI's texts in one language; [messages] are the matching ones raised by the shared code. */
 interface Strings {
@@ -24,6 +26,12 @@ interface Strings {
     val add: String
     val name: String
     val undo: String
+    val redo: String
+    /** Shown after undoing [action], like "Undone: used one “Milk”"; the same for redoing. */
+    fun undone(action: PantryAction): String
+    fun redone(action: PantryAction): String
+    fun undone(action: ListAction): String
+    fun redone(action: ListAction): String
     val notNow: String
 
     // The pantry
@@ -198,6 +206,32 @@ object EnglishStrings : Strings {
     override val add = "Add"
     override val name = "Name"
     override val undo = "Undo"
+    override val redo = "Redo"
+    override fun undone(action: PantryAction) = "Undone: ${describe(action)}"
+    override fun redone(action: PantryAction) = "Redone: ${describe(action)}"
+    override fun undone(action: ListAction) = "Undone: ${describe(action)}"
+    override fun redone(action: ListAction) = "Redone: ${describe(action)}"
+
+    private fun describe(action: PantryAction) = when (action) {
+        is PantryAction.AddedFood -> "added “${action.name}”"
+        is PantryAction.UsedOne -> "used one “${action.name}”"
+        is PantryAction.Finished -> "finished “${action.name}”"
+        is PantryAction.DeletedFood -> "deleted “${action.name}”"
+        is PantryAction.EditedFood -> "edited “${action.name}”"
+        is PantryAction.MovedFood -> "moved “${action.name}”"
+        is PantryAction.PutAway -> if (action.count == 1) "put away 1 item from the receipt" else "put away ${action.count} items from the receipt"
+        is PantryAction.AddedSpace -> "added space “${action.name}”"
+        is PantryAction.RenamedSpace -> "renamed space “${action.name}”"
+        is PantryAction.MovedSpace -> "moved space “${action.name}”"
+        is PantryAction.DeletedSpace -> "deleted space “${action.name}”"
+    }
+
+    private fun describe(action: ListAction) = when (action) {
+        is ListAction.AddedItem -> "added “${action.text}”"
+        is ListAction.CheckedItem -> "checked “${action.text}”"
+        is ListAction.UncheckedItem -> "unchecked “${action.text}”"
+        ListAction.Other -> "the last change"
+    }
     override val notNow = "Not now"
 
     override val pantry = "Pantry"
@@ -379,6 +413,33 @@ object ItalianStrings : Strings {
     override val add = "Aggiungi"
     override val name = "Nome"
     override val undo = "Annulla"
+    override val redo = "Ripeti"
+    override fun undone(action: PantryAction) = "Annullato: ${describe(action)}"
+    override fun redone(action: PantryAction) = "Ripetuto: ${describe(action)}"
+    override fun undone(action: ListAction) = "Annullato: ${describe(action)}"
+    override fun redone(action: ListAction) = "Ripetuto: ${describe(action)}"
+
+    private fun describe(action: PantryAction) = when (action) {
+        is PantryAction.AddedFood -> "aggiunta di “${action.name}”"
+        is PantryAction.UsedOne -> "consumo di “${action.name}”"
+        is PantryAction.Finished -> "esaurimento di “${action.name}”"
+        is PantryAction.DeletedFood -> "eliminazione di “${action.name}”"
+        is PantryAction.EditedFood -> "modifica di “${action.name}”"
+        is PantryAction.MovedFood -> "spostamento di “${action.name}”"
+        is PantryAction.PutAway ->
+            if (action.count == 1) "sistemazione di 1 prodotto dello scontrino" else "sistemazione di ${action.count} prodotti dello scontrino"
+        is PantryAction.AddedSpace -> "aggiunta dello spazio “${action.name}”"
+        is PantryAction.RenamedSpace -> "cambio del nome dello spazio “${action.name}”"
+        is PantryAction.MovedSpace -> "spostamento dello spazio “${action.name}”"
+        is PantryAction.DeletedSpace -> "eliminazione dello spazio “${action.name}”"
+    }
+
+    private fun describe(action: ListAction) = when (action) {
+        is ListAction.AddedItem -> "aggiunta di “${action.text}”"
+        is ListAction.CheckedItem -> "spunta di “${action.text}”"
+        is ListAction.UncheckedItem -> "rimozione della spunta di “${action.text}”"
+        ListAction.Other -> "ultima modifica"
+    }
     override val notNow = "Non ora"
 
     override val pantry = "Dispensa"

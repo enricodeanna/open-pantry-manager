@@ -130,7 +130,7 @@ class PantrySharingTest {
         val b = phone()
         b.sharePantry(cloud.link, "Dispensa")
 
-        val step = a.addItem("Latte", fridge)
+        val step = a.addItem("Latte", fridge)!!
         b.addItem("Pasta", fridge)
         b.syncPantry()
         a.syncPantry()

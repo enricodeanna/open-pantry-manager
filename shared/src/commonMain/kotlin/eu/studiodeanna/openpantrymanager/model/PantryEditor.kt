@@ -115,21 +115,24 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
     }
 
     /**
-     * Puts the items whose ids are in [before] back as they were then; null there means the item did
-     * not exist, so it is removed. Items changed since by someone else are put back too, as the user
-     * asked for exactly this.
+     * Takes [change] back as an edit of its own: each space and item it touched returns to how it was
+     * (one it created is deleted), unless it has been changed again since, by another device of a
+     * shared pantry say, which is left as it is.
      */
-    fun restore(doc: PantryDocument, before: Map<String, PantryItem?>): PantryDocument {
+    fun revert(doc: PantryDocument, change: PantryChange): PantryDocument {
         val at = doc.stamp()
-        val known = doc.items.associateBy { it.id }
-        val restored = before.mapNotNull { (id, old) ->
-            when {
-                old != null -> old.copy(at = at, by = device)
-                else -> known[id]?.copy(deleted = true, at = at, by = device)
-            }
-        }
-        val ids = restored.mapTo(HashSet()) { it.id }
-        return doc.copy(items = doc.items.filterNot { it.id in ids } + restored)
+        val spaces = change.spaces.associateBy { (_, new) -> new.id }
+        val items = change.items.associateBy { (_, new) -> new.id }
+        return doc.copy(
+            spaces = doc.spaces.map { current ->
+                val (old, new) = spaces[current.id] ?: return@map current
+                if (!current.sameAs(new)) current else (old ?: new.copy(deleted = true)).copy(at = at, by = device)
+            },
+            items = doc.items.map { current ->
+                val (old, new) = items[current.id] ?: return@map current
+                if (!current.sameAs(new)) current else (old ?: new.copy(deleted = true)).copy(at = at, by = device)
+            },
+        )
     }
 
     private fun PantryDocument.sameFood(name: String, space: String, expires: LocalDate?): PantryItem? =
@@ -137,10 +140,4 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
 
     private fun PantryDocument.withItem(item: PantryItem): PantryDocument =
         copy(items = items.map { if (it.id == item.id) item else it })
-}
-
-/** The items that differ between two versions, as they were in [before]; null for ones [before] lacked. */
-fun changedItems(before: PantryDocument, after: PantryDocument): Map<String, PantryItem?> {
-    val old = before.items.associateBy { it.id }
-    return after.items.filter { old[it.id] != it }.associate { it.id to old[it.id] }
 }

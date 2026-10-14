@@ -2,6 +2,7 @@ package eu.studiodeanna.openpantrymanager.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +58,14 @@ import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -112,6 +121,7 @@ fun PantryScreen(
     val collapsed by repository.collapsedSpaces.collectAsState()
     val shopping by repository.shopping.collectAsState()
     val sharing by repository.sharing.collectAsState()
+    val undoState by repository.undoState.collectAsState()
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -136,6 +146,23 @@ fun PantryScreen(
         }
     }
 
+    /** Says what an undo or redo did, replacing the previous message so quick taps don't queue up. */
+    fun say(message: String) {
+        scope.launch {
+            snackbars.currentSnackbarData?.dismiss()
+            snackbars.showSnackbar(message)
+        }
+    }
+
+    fun undo() = repository.undo()?.let { say(texts.undone(it)) }
+    fun redo() = repository.redo()?.let { say(texts.redone(it)) }
+
+    // Holds the keyboard focus whenever no field or dialog has it, so Ctrl+Z, Ctrl+Y and Ctrl+F reach the pantry.
+    val keys = remember { FocusRequester() }
+    LaunchedEffect(adding, dialog, query) {
+        if (adding == null && dialog == null && query == null) runCatching { keys.requestFocus() }
+    }
+
     fun finished(name: String) {
         if (settings.offerShopping) dialog = Dialog.Shopping(name)
     }
@@ -154,13 +181,27 @@ fun PantryScreen(
     BackHandler(enabled = query != null) { query = null }
 
     Scaffold(
+        modifier = Modifier
+            .onKeyEvent { event ->
+                // Text fields take these first, for undoing typing.
+                if (event.type != KeyEventType.KeyDown || !(event.isCtrlPressed || event.isMetaPressed)) return@onKeyEvent false
+                when {
+                    event.key == Key.Z && !event.isShiftPressed -> undo()
+                    event.key == Key.Z || event.key == Key.Y -> redo()
+                    event.key == Key.F -> query = ""
+                    else -> return@onKeyEvent false
+                }
+                true
+            }
+            .focusRequester(keys)
+            .focusable(),
         snackbarHost = { SnackbarHost(snackbars) },
         topBar = {
             TopAppBar(
                 title = {
                     val q = query
                     if (q == null) {
-                        Text(strings.pantry)
+                        Text(strings.pantry, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     } else {
                         val focus = remember { FocusRequester() }
                         TextField(
@@ -184,7 +225,12 @@ fun PantryScreen(
                 },
                 actions = {
                     if (query == null) {
-                        IconButton(onClick = { query = "" }) { Icon(AppIcons.Search, contentDescription = strings.search) }
+                        IconButton(onClick = { undo() }, enabled = undoState.canUndo) {
+                            Icon(AppIcons.Undo, contentDescription = strings.undo)
+                        }
+                        IconButton(onClick = { redo() }, enabled = undoState.canRedo) {
+                            Icon(AppIcons.Redo, contentDescription = strings.redo)
+                        }
                         if (onScan != null && spaces.isNotEmpty()) {
                             IconButton(onClick = onScan) { Icon(AppIcons.Camera, contentDescription = strings.scanReceipt) }
                         }
@@ -192,6 +238,8 @@ fun PantryScreen(
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(AppIcons.MoreVert, contentDescription = strings.more) }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                // In the menu, as in Open Check Lists, so that undo and redo fit beside the title.
+                                MenuItem(strings.search) { menu = false; query = "" }
                                 MenuItem(strings.addSpace) { menu = false; dialog = Dialog.AddSpace }
                                 MenuItem(if (settings.order == ItemOrder.Name) strings.sortByExpiry else strings.sortByName) {
                                     menu = false
@@ -366,7 +414,7 @@ fun PantryScreen(
             },
             onFinished = {
                 dialog = null
-                announce(texts.finishedMessage(d.item.name), repository.removeItem(d.item.id))
+                announce(texts.finishedMessage(d.item.name), repository.removeItem(d.item.id, finished = true))
                 finished(d.item.name)
             },
             onDelete = {

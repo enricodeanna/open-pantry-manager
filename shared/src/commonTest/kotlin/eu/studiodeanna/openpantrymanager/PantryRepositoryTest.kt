@@ -1,22 +1,27 @@
 package eu.studiodeanna.openpantrymanager
 
+import eu.studiodeanna.openpantrymanager.checklist.ListAction
 import eu.studiodeanna.openpantrymanager.checklist.ListCodec
 import eu.studiodeanna.openpantrymanager.checklist.itemsBySection
 import eu.studiodeanna.openpantrymanager.checklist.visibleSections
+import eu.studiodeanna.openpantrymanager.model.PantryAction
+import eu.studiodeanna.openpantrymanager.model.UndoState
+import eu.studiodeanna.openpantrymanager.model.item
 import eu.studiodeanna.openpantrymanager.model.liveItems
+import eu.studiodeanna.openpantrymanager.model.visibleSpaces
 import eu.studiodeanna.openpantrymanager.receipt.OcrLine
 import eu.studiodeanna.openpantrymanager.receipt.Recognition
 import eu.studiodeanna.openpantrymanager.store.MemoryFileStore
 import eu.studiodeanna.openpantrymanager.sync.FakeNextcloud
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runTest
-import kotlinx.datetime.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.LocalDate
 
 class PantryRepositoryTest {
     private val files = MemoryFileStore()
@@ -72,12 +77,67 @@ class PantryRepositoryTest {
         repo.addItem("Milk", fridge)
         val milk = repo.pantry.value.liveItems().single()
         val step = repo.moveItem(milk.id, cabinet)!!
-        repo.undo(step)
+        assertEquals(PantryAction.MovedFood("Milk"), repo.undo(step))
         assertEquals(fridge, repo.pantry.value.liveItems().single().space)
         assertNull(repo.moveFor(repo.pantry.value.liveItems().single()))
-        // Only the latest change can be undone, once.
-        repo.undo(step)
+        // A message's Undo acts only while its edit is the latest.
+        assertNull(repo.undo(step))
         assertEquals(1, repo.pantry.value.liveItems().size)
+    }
+
+    @Test
+    fun editsAreUndoneAndRedoneOneByOneAsInOpenCheckLists() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        repo.addItem("Milk", fridge, 2)
+        val milk = repo.pantry.value.liveItems().single().id
+        repo.useOne(milk)
+        repo.useOne(milk)
+        assertEquals(emptyList(), repo.pantry.value.liveItems())
+
+        assertEquals(PantryAction.Finished("Milk"), repo.undo())
+        assertEquals(PantryAction.UsedOne("Milk"), repo.undo())
+        assertEquals(2, repo.pantry.value.item(milk)?.quantity)
+        assertEquals(UndoState(canUndo = true, canRedo = true), repo.undoState.value)
+        assertEquals(PantryAction.UsedOne("Milk"), repo.redo())
+        assertEquals(1, repo.pantry.value.item(milk)?.quantity)
+
+        // Undone back to the start, the space and what was learned go too; redone, they come back.
+        repo.undo()
+        repo.undo()
+        assertEquals(PantryAction.AddedSpace("Fridge"), repo.undo())
+        assertEquals(emptyList(), repo.pantry.value.visibleSpaces())
+        assertNull(repo.food("milk"))
+        assertNull(repo.undo())
+        repo.redo()
+        repo.redo()
+        assertEquals(fridge, repo.placeFor("milk"))
+        assertEquals(2, repo.pantry.value.item(milk)?.quantity)
+
+        // A new edit can be undone, and what was undone before it can no longer be redone.
+        repo.addItem("Eggs", fridge)
+        assertEquals(UndoState(canUndo = true, canRedo = false), repo.undoState.value)
+        assertNull(repo.redo())
+    }
+
+    @Test
+    fun tickingTheShoppingListIsUndoneAndRedone() = runTest {
+        val cloud = FakeNextcloud(folder = true)
+        cloud.overwrite(openCheckListsFile, "Groceries.json")
+        val repo = repository(cloud.http)
+        repo.load()
+        repo.linkShoppingList(cloud.link)
+        repo.setShoppingDone("item00000002", true)
+        repo.addToShopping("Apples", Sublist.New("Fruit"))
+        assertEquals(ListAction.AddedItem("Apples"), repo.undoShopping())
+        assertEquals(listOf("Dairy", "Greengrocer"), repo.shopping.value!!.doc.visibleSections().map { it.name })
+        assertEquals(ListAction.CheckedItem("Bread"), repo.undoShopping())
+        assertEquals(false, repo.shopping.value!!.doc.items.single { it.id == "item00000002" }.done)
+        assertEquals(ListAction.CheckedItem("Bread"), repo.redoShopping())
+        assertEquals(true, repo.shopping.value!!.doc.items.single { it.id == "item00000002" }.done)
+        // Undoing the list leaves the pantry's history alone.
+        assertEquals(UndoState(), repo.undoState.value)
     }
 
     @Test

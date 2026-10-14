@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.model
 
+import eu.studiodeanna.openpantrymanager.memory.Memory
 import kotlinx.datetime.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,14 +51,20 @@ class PantryEditorTest {
     }
 
     @Test
-    fun restorePutsBackWhatAChangeTouched() {
+    fun revertPutsBackWhatAChangeTouchedButNotWhatChangedSince() {
         val (doc, cabinet, fridge) = pantry()
         val (start, water) = editor.addItem(doc, "Water", cabinet, 6)
         val moved = editor.moveItem(start, water, fridge, 2)
-        val undone = editor.restore(moved, changedItems(start, moved))
+        val change = pantryChangeBetween(start, moved, Memory(), Memory())!!
+        val undone = editor.revert(moved, change)
         assertEquals(mapOf(cabinet to 6), undone.named("Water").associate { it.space to it.quantity })
-        // The restore is an edit of its own, stamped after the move.
+        // The revert is an edit of its own, stamped after the move.
         assert(undone.latestStamp() > moved.latestStamp())
+
+        // Once another device has changed the water left in the cabinet, only the bottles moved go back.
+        val elsewhere = PantryEditor("other") { 50 }.editItem(moved, water, "Water", 3, null)
+        val partly = editor.revert(elsewhere, change)
+        assertEquals(mapOf(cabinet to 3), partly.named("Water").associate { it.space to it.quantity })
     }
 
     @Test

@@ -90,6 +90,16 @@ internal fun Memory.withLearned(things: Map<String, Learned?>, stamp: Stamp): Me
     return memoryOf(learned, stamps + things.keys.associateWith { stamp })
 }
 
+/**
+ * [changes] (each thing learned: before, after) taken back, where this memory still knows what they
+ * made it; what was learned again since stays. Stamped [stamp].
+ */
+internal fun Memory.reverted(changes: Map<String, Pair<Learned?, Learned?>>, stamp: Stamp): Memory {
+    val current = learned()
+    val back = changes.filter { (key, change) -> current[key] == change.second }.mapValues { it.value.first }
+    return if (back.isEmpty()) this else withLearned(back, stamp)
+}
+
 /** A stamp for a change on [device] at [now], never before a change this memory has already seen. */
 fun Memory.nextStamp(now: Long, device: String): Stamp =
     Stamp(maxOf(now, (stamps.values.maxOfOrNull { it.at } ?: 0) + 1), device)
