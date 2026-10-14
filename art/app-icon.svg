@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- The rounded tile, for stores and, later, desktop and web. -->
+  <rect width="1024" height="1024" rx="224" fill="#7A4A1C"/>
+  <g transform="translate(512 512) scale(1.12) translate(-512 -500)">
+    <ellipse cx="512" cy="812" rx="270" ry="34" fill="#2A1606" opacity="0.35"/>
+    <rect x="282" y="318" width="460" height="490" rx="84" fill="#FBF1DD"/>
+    <path d="M282 520 C380 496 460 548 532 524 C604 500 680 506 742 524 L742 724 C742 770 704 808 658 808 L366 808 C320 808 282 770 282 724 Z" fill="#E0782E"/>
+    <rect x="322" y="360" width="34" height="380" rx="17" fill="#FFFFFF" opacity="0.55"/>
+    <rect x="330" y="282" width="364" height="60" rx="18" fill="#E9D8B8"/>
+    <rect x="304" y="196" width="416" height="104" rx="34" fill="#F2B544"/>
+    <rect x="304" y="262" width="416" height="38" rx="14" fill="#D9962C"/>
+    <rect x="388" y="572" width="248" height="164" rx="24" fill="#FFFDF7"/>
+    <path d="M446 656 L494 700 L582 610" fill="none" stroke="#4C8C3A" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
