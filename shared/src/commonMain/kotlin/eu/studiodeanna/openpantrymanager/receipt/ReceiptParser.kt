@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.receipt
 
+import eu.studiodeanna.openpantrymanager.model.editDistance
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -97,21 +98,6 @@ object ReceiptParser {
         if (a.isEmpty() || b.isEmpty()) return false
         if (minOf(a.length, b.length) <= 3) return a == b
         return editDistance(a, b) * 5 <= maxOf(a.length, b.length)
-    }
-
-    private fun editDistance(a: String, b: String): Int {
-        var previous = IntArray(b.length + 1) { it }
-        var current = IntArray(b.length + 1)
-        for (i in 1..a.length) {
-            current[0] = i
-            for (j in 1..b.length) {
-                current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
-            }
-            val swap = previous
-            previous = current
-            current = swap
-        }
-        return previous[b.length]
     }
 
     /** The printed rows, top to bottom, each one's pieces joined left to right. */

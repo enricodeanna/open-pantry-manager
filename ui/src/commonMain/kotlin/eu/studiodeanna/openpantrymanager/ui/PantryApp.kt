@@ -46,7 +46,7 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null) {
                 LaunchedEffect(repository) {
                     repository.load()
                     loaded = true
-                    repository.syncShopping()
+                    repository.syncNow()
                 }
                 if (!loaded) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }

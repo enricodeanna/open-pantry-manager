@@ -31,8 +31,9 @@ class SharePasswordRequired(message: String) : RemoteException(message)
  * `/public.php/webdav` (token as user name). The old path must not be used on newer servers:
  * Nextcloud 34 answers there with a folder that is not the share, where nothing can be created.
  *
- * A folder share holds any number of lists, one file each, named after the list; a file share is
- * one list. The pantry only uses shares Open Check Lists made, so it never creates files in them.
+ * A folder share holds any number of lists, one file each, named after the list, and pantries, one
+ * file each ending in [SharedPantry.EXTENSION]; a file share is one of them. The app creates pantry
+ * files; list files only Open Check Lists makes.
  */
 class NextcloudShare(
     private val link: ParsedLink.Nextcloud,
@@ -76,6 +77,45 @@ class NextcloudShare(
             }
             SharedList(name, title.ifBlank { name.removeSuffix(".json") })
         }.sortedBy { it.title.lowercase() }
+    }
+
+    /** The pantries in a folder share, skipping files that are not pantries. */
+    suspend fun pantries(): List<SharedList> = guarded(server) {
+        resolve()
+        fileNames().filter { it.endsWith(SharedPantry.EXTENSION, ignoreCase = true) }.mapNotNull { name ->
+            val response = send(HttpMethod.Get, fileUrl(name))
+            if (!response.status.isSuccess() || !SharedPantryCodec.isPantry(response.bodyAsText())) return@mapNotNull null
+            SharedList(name, name.dropLast(SharedPantry.EXTENSION.length))
+        }.sortedBy { it.title.lowercase() }
+    }
+
+    /**
+     * Creates a file for [title] in a folder share, holding [content], and returns its name: the title
+     * and [extension], or the title with the next free number. The name is claimed with a create-only
+     * write, so two people creating one of the same name at once end up with two files.
+     */
+    suspend fun createFile(title: String, extension: String, content: String): String = guarded(server) {
+        resolve()
+        val taken = fileNames().mapTo(HashSet()) { it.lowercase() }
+        var n = 1
+        while (n <= MAX_FILE_NUMBER) {
+            val name = shareFileName(title, extension, n++)
+            if (name.lowercase() in taken) continue
+            val response = send(HttpMethod.Put, fileUrl(name)) {
+                header(HttpHeaders.IfNoneMatch, "*")
+                contentType(ContentType.Application.Json)
+                setBody(content)
+            }
+            when {
+                response.status.isSuccess() -> return@guarded name
+                response.status == HttpStatusCode.PreconditionFailed -> taken += name.lowercase()
+                else -> {
+                    if (response.status == HttpStatusCode.Forbidden) runCatching { propfind() }
+                    fail(response, writing = true, creating = true)
+                }
+            }
+        }
+        throw RemoteException(Messages.current.folderNameTaken(title))
     }
 
     private suspend fun fileNames(): List<String> {

@@ -39,14 +39,15 @@ the same space is counted rather than listed twice. Ticking food means one of it
 goes down, and the last one takes it out of the pantry. Food expiring within three days, or already
 expired, is listed under **Use soon** at the top.
 
-**What the app learns** (`shared/.../memory/Memory.kt`), kept on the device in `memory.json`:
+**What the app learns** (`shared/.../memory/Memory.kt`), kept on the device in `memory.json`, and shared
+with the pantry when it is shared:
 
 - where each food goes. Typing a name offers the foods it knows, and picks the space that food usually
   goes in (marked ★) until you pick another;
 - where each food goes when moved from a given space. The move dialog starts on that space; for a food
   never moved from there, on where anything moved from there went;
 - how long a food keeps, from the expiry days you set, offered as a one-tap date ("As usual: 21 Oct");
-- which sublist of the shopping list each food goes on;
+- what each food is called on the shopping list ("Latte" for "Latte p.s. Friuli"), and in which sublist;
 - what the lines of receipts mean, and which lines to leave out (bags, deposits), and how many items
   one line is (a pack of 6 bottles). Lines are compared by their letters, so a line read once with a
   space less ("DETERSIVOPIATTI") is still the line it was.
@@ -77,22 +78,45 @@ have yet: **New space** among the spaces names one there and then.
 
 **The shopping list** is a list of Open Check Lists, kept in the same file by both apps. In Open Check
 Lists, share the list through Nextcloud, copy its link, and paste it in this app (Settings, or the
-cart icon). When food is finished, the app offers to put it on that list, in one of its sublists
-(Open Check Lists' sections), none, or a new one; it suggests the sublist it went on last time. A food
-already unticked on the list is not added again; a ticked one is unticked rather than added twice.
-The cart icon shows the list, to tick while shopping.
+cart icon). When food is finished, the app offers to put it on that list, under the name it had there
+last time (which can be changed), in one of its sublists (Open Check Lists' sections), none, or a new
+one; it suggests the sublist it went on last time. Items of the list with the same or a similar name
+("Latte" for "Latte intero", "Mele" for "Mela"), ticked or not, are offered instead: picking one puts it
+back on the list, and from then on that is the food's name there. A name already on the list, unticked,
+is not added again. The cart icon shows the list, to tick while shopping.
 
 The list file is read and written exactly as Open Check Lists does: the same fields, the same
 per-item merge where the latest change wins, the same conditional writes on Nextcloud. The code for it
 (`shared/.../checklist` and `shared/.../sync`) is copied from Open Check Lists; a change to its file
 format must be made in both apps. A file saved by a newer format is refused, not damaged.
 
+**Sharing the pantry.** Menu → *Share the pantry* (or Settings): share a Nextcloud folder by link with
+editing allowed, and paste the link. The pantry is saved there as `Dispensa.pantry` (`Pantry.pantry` in
+English), with everything the app has learned and the link of the shopping list. On another phone,
+paste the same link (Settings shows the address to send, which names the file): that phone joins the
+pantry, and follows its shopping list. A phone with spaces or food of its own is asked whether to add
+them to the shared pantry, where spaces with the same name become one and what both phones learned adds
+up, or to use only the shared pantry, keeping its own aside in `pantry-before-sharing-<time>.json`.
+
+From then on every phone syncs shortly after each change and when the app is opened, as the shopping
+list does: each space, item and learned thing (a food, where things go from a space, a receipt line)
+carries when and on which phone it last changed, the latest change wins, and writes are conditional, so
+no change is overwritten unseen. Two phones learning about the same food within the same few seconds
+keep one of the two lessons. An undo takes back only what its change did, not what other phones did
+meanwhile. Linking or unlinking the shopping list on one phone does so on all of them. Theme, language,
+order and folded spaces stay each phone's own.
+
+The file ends in `.pantry`, not `.json`, and is marked as a pantry inside: Open Check Lists takes every
+`.json` file in a shared folder for a list, and an empty pantry reads as an empty list there. Each app
+refuses the other's files, so a pantry and its shopping list can live in the same folder.
+
 ## Storage
 
 Everything is in the app's files directory, as JSON: `pantry.json` (spaces and food, stamped per change
-and merged like an Open Check Lists list, so that the pantry itself can later be shared between
-devices), `memory.json`, `settings.json`, `device.json` (this device's id and the linked list) and
-`shopping-list.json` (this device's copy of the list). A `pantry.json` this version cannot read is kept
+and merged like an Open Check Lists list), `memory.json` (with a stamp per learned thing),
+`settings.json`, `device.json` (this device's id, the linked list and the shared pantry) and
+`shopping-list.json` (this device's copy of the list). The shared pantry's file holds `pantry.json` and
+`memory.json` together (`sync/SharedPantry.kt`). A `pantry.json` this version cannot read is kept
 aside as `pantry-unreadable-<time>.json` instead of being overwritten.
 
 ## The text reader's networks
@@ -142,8 +166,13 @@ shaded, small, and a long one in three overlapping photos and in one large photo
   The receipts were made-up ones; not yet tried with a real paper receipt, nor with the phone's camera
   app and gallery (which do not open over a locked phone's lock screen), nor next to Open Check Lists
   on the same list.
-- **Google Drive lists are not supported yet**: only Nextcloud links. Drive would need this app's own
-  OAuth client in the Google Cloud project, as Open Check Lists has.
+- **Sharing the pantry** was tested with two simulated phones and against a real Nextcloud 34 folder share
+  (`RealNextcloudTest`, run with `OPM_NEXTCLOUD_TEST_LINK` set to a folder link), not yet with two
+  real phones.
+- **Google Drive is not supported yet**, for lists or pantries: only Nextcloud links. Drive would need
+  this app's own OAuth client in the Google Cloud project, as Open Check Lists has.
+- The shared pantry's file carries the shopping list's link, with its password if the share has one:
+  whoever can open the pantry can open the list.
 - The shopping list is reached through its share link, so a list that lives only in Open Check Lists on
   the same phone, unshared, cannot be used.
 - Receipts are read in **Latin script** only.

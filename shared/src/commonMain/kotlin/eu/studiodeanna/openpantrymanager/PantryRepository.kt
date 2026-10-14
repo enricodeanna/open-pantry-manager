@@ -1,29 +1,42 @@
 package eu.studiodeanna.openpantrymanager
 
+import eu.studiodeanna.openpantrymanager.checklist.Item
 import eu.studiodeanna.openpantrymanager.checklist.ListCodec
 import eu.studiodeanna.openpantrymanager.checklist.ListDocument
 import eu.studiodeanna.openpantrymanager.checklist.ListEditor
 import eu.studiodeanna.openpantrymanager.checklist.merge
+import eu.studiodeanna.openpantrymanager.checklist.pending
 import eu.studiodeanna.openpantrymanager.checklist.pruned
+import eu.studiodeanna.openpantrymanager.checklist.similarItems
 import eu.studiodeanna.openpantrymanager.checklist.visibleSections
 import eu.studiodeanna.openpantrymanager.memory.Food
+import eu.studiodeanna.openpantrymanager.memory.Learned
 import eu.studiodeanna.openpantrymanager.memory.Memory
+import eu.studiodeanna.openpantrymanager.memory.changedTo
+import eu.studiodeanna.openpantrymanager.memory.combinedWith
 import eu.studiodeanna.openpantrymanager.memory.complete
+import eu.studiodeanna.openpantrymanager.memory.differencesFrom
 import eu.studiodeanna.openpantrymanager.memory.food
 import eu.studiodeanna.openpantrymanager.memory.moveFor
 import eu.studiodeanna.openpantrymanager.memory.moved
+import eu.studiodeanna.openpantrymanager.memory.nextStamp
 import eu.studiodeanna.openpantrymanager.memory.placeFor
 import eu.studiodeanna.openpantrymanager.memory.placed
 import eu.studiodeanna.openpantrymanager.memory.receiptKey
 import eu.studiodeanna.openpantrymanager.memory.receiptMeans
 import eu.studiodeanna.openpantrymanager.memory.receiptSkips
-import eu.studiodeanna.openpantrymanager.memory.wentOnSublist
+import eu.studiodeanna.openpantrymanager.memory.wentOnList
+import eu.studiodeanna.openpantrymanager.memory.withLearned
+import eu.studiodeanna.openpantrymanager.memory.withSpaces
 import eu.studiodeanna.openpantrymanager.model.PantryCodec
 import eu.studiodeanna.openpantrymanager.model.PantryDocument
 import eu.studiodeanna.openpantrymanager.model.PantryEditor
 import eu.studiodeanna.openpantrymanager.model.PantryItem
 import eu.studiodeanna.openpantrymanager.model.changedItems
+import eu.studiodeanna.openpantrymanager.model.compareStamps
 import eu.studiodeanna.openpantrymanager.model.item
+import eu.studiodeanna.openpantrymanager.model.liveItems
+import eu.studiodeanna.openpantrymanager.model.mergeStamped
 import eu.studiodeanna.openpantrymanager.model.nameKey
 import eu.studiodeanna.openpantrymanager.model.pruned
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
@@ -34,16 +47,25 @@ import eu.studiodeanna.openpantrymanager.receipt.Recognizer
 import eu.studiodeanna.openpantrymanager.store.DeviceState
 import eu.studiodeanna.openpantrymanager.store.FileStore
 import eu.studiodeanna.openpantrymanager.store.Settings
+import eu.studiodeanna.openpantrymanager.sync.NextcloudPublicFile
+import eu.studiodeanna.openpantrymanager.sync.PantryFormat
 import eu.studiodeanna.openpantrymanager.sync.RemoteException
 import eu.studiodeanna.openpantrymanager.sync.ShareLink
 import eu.studiodeanna.openpantrymanager.sync.ShareLinks
 import eu.studiodeanna.openpantrymanager.sync.SharedList
+import eu.studiodeanna.openpantrymanager.sync.SharedPantry
+import eu.studiodeanna.openpantrymanager.sync.SharedPantryCodec
+import eu.studiodeanna.openpantrymanager.sync.SharedShoppingList
+import eu.studiodeanna.openpantrymanager.sync.merge
 import eu.studiodeanna.openpantrymanager.sync.nextcloudShareFor
 import eu.studiodeanna.openpantrymanager.sync.remoteFileFor
+import eu.studiodeanna.openpantrymanager.sync.syncDocument
 import eu.studiodeanna.openpantrymanager.sync.syncWith
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
+import kotlin.random.Random
+import kotlin.time.Clock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -58,8 +80,6 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.todayIn
 import kotlinx.serialization.json.Json
-import kotlin.random.Random
-import kotlin.time.Clock
 
 sealed interface SyncState {
     data object Syncing : SyncState
@@ -86,18 +106,40 @@ sealed interface Sublist {
 /** Thrown by [PantryRepository.linkShoppingList] when a shared folder holds several lists to choose from. */
 class ListChoiceNeeded(val link: ShareLink, val lists: List<SharedList>) : RemoteException(Messages.current.chooseList)
 
+/** The shared pantry this device is in, and how syncing it goes. */
+data class PantrySharing(val link: ShareLink, val sync: SyncState)
+
+/** Thrown by [PantryRepository.sharePantry] when a shared folder holds several pantries to choose from. */
+class PantryChoiceNeeded(val link: ShareLink, val pantries: List<SharedList>) : RemoteException(Messages.current.choosePantry)
+
+/**
+ * Thrown by [PantryRepository.sharePantry] when the shared pantry exists already and this device's has
+ * spaces or food of its own: the user says how the two become one, and the call is made again.
+ */
+class JoinChoiceNeeded(val link: ShareLink) : RemoteException("")
+
+/** How a device's own pantry joins a shared one that exists already. */
+enum class JoinMode {
+    /** Its spaces and food join the shared pantry, and what it learned; spaces of the same name become one. */
+    Merge,
+
+    /** The shared pantry replaces it; the device's own is kept aside in a file. */
+    Replace,
+}
+
 /**
  * One change to the pantry that the user can take back: the items it touched as they were before,
- * and what the app knew before learning from it.
+ * and the things the app learned from it as they were before.
  */
 class UndoStep internal constructor(
     internal val items: Map<String, PantryItem?>,
-    internal val memory: Memory,
+    internal val memory: Map<String, Learned?>,
 )
 
 /**
  * The pantry on this device, what the app has learned, and the linked shopping list. Edits are saved
- * at once; the shopping list syncs shortly after each change and whenever [syncShopping] is called.
+ * at once. The shopping list, and the pantry when it is shared ([sharePantry]), sync shortly after
+ * each change and whenever [syncNow] is called.
  */
 class PantryRepository(
     private val files: FileStore,
@@ -124,6 +166,11 @@ class PantryRepository(
     /** The spaces folded away on this device. */
     val collapsedSpaces: StateFlow<Set<String>> = _collapsed.asStateFlow()
 
+    private val _sharing = MutableStateFlow<PantrySharing?>(null)
+
+    /** The shared pantry this device is in; null while the pantry is this device's alone. */
+    val sharing: StateFlow<PantrySharing?> = _sharing.asStateFlow()
+
     private var device = DeviceState("")
     private lateinit var editor: PantryEditor
     private lateinit var listEditor: ListEditor
@@ -131,6 +178,8 @@ class PantryRepository(
     private val saveLock = Mutex()
     private val syncLock = Mutex()
     private var pendingSync: Job? = null
+    private val pantryLock = Mutex()
+    private var pendingPantrySync: Job? = null
 
     /** Reads everything from disk; later calls (a recreated screen, say) do nothing. */
     suspend fun load() {
@@ -147,6 +196,9 @@ class PantryRepository(
         _collapsed.value = device.collapsedSpaces
         editor = PantryEditor(device.device, now)
         listEditor = ListEditor(device.device, now)
+        device.pantryLink?.let { link ->
+            _sharing.value = PantrySharing(link, device.pantrySyncedAt?.let { SyncState.Synced(it) } ?: SyncState.Syncing)
+        }
         val link = device.shoppingLink ?: return
         val doc = files.read(SHOPPING)?.let { runCatching { ListCodec.decode(it) }.getOrNull() } ?: ListDocument()
         _shopping.value = ShoppingList(
@@ -227,23 +279,33 @@ class PantryRepository(
         return edit({ editor.removeItem(it, id) })
     }
 
-    /** Takes back [step], if it is still the latest change. */
+    /**
+     * Takes back [step], if it is still the latest change: the items and the things learned it changed,
+     * and only those, so that what other devices of a shared pantry did meanwhile stays.
+     */
     fun undo(step: UndoStep) {
         if (step !== lastUndo) return
         lastUndo = null
         setPantry(editor.restore(_pantry.value, step.items))
-        setMemory(step.memory)
+        if (step.memory.isNotEmpty()) setMemory(_memory.value.withLearned(step.memory, stamp()))
     }
 
     private fun edit(change: (PantryDocument) -> PantryDocument, learn: (Memory) -> Memory = { it }): UndoStep {
         val before = _pantry.value
         val after = change(before)
-        val step = UndoStep(changedItems(before, after), _memory.value)
+        val known = _memory.value
+        val learned = learn(known)
+        val step = UndoStep(changedItems(before, after), known.differencesFrom(learned))
         lastUndo = step
         setPantry(after)
-        setMemory(learn(_memory.value))
+        learnNow(learned)
         return step
     }
+
+    /** What the app knows now: [learned], which it became on this device, stamped where it changed. */
+    private fun learnNow(learned: Memory) = setMemory(_memory.value.changedTo(learned, stamp()))
+
+    private fun stamp() = _memory.value.nextStamp(now(), device.device)
 
     // Suggestions
 
@@ -326,16 +388,24 @@ class PantryRepository(
         val doc = syncWith(remoteFileFor(target, http), ListDocument())
         _shopping.value = ShoppingList(target, doc, SyncState.Synced(now()))
         saveShoppingDoc()
-        saveDevice(device.copy(shoppingLink = target, shoppingSyncedAt = now(), shoppingCollapsed = emptySet()))
+        saveDevice(device.copy(shoppingLink = target, shoppingSyncedAt = now(), shoppingCollapsed = emptySet()).linkStamped())
+        schedulePantrySync(0)
     }
 
-    /** Stops using the shopping list on this device; the list itself is left as it is. */
+    /**
+     * Stops using the shopping list on this device, and on the others of a shared pantry; the list
+     * itself is left as it is.
+     */
     suspend fun unlinkShoppingList() {
         pendingSync?.cancel()
         _shopping.value = null
         saveLock.withLock { files.delete(SHOPPING) }
-        saveDevice(device.copy(shoppingLink = null, shoppingSyncedAt = null, shoppingCollapsed = emptySet()))
+        saveDevice(device.copy(shoppingLink = null, shoppingSyncedAt = null, shoppingCollapsed = emptySet()).linkStamped())
+        schedulePantrySync(0)
     }
+
+    /** This state with its shopping list stamped as changed on this device now, for a shared pantry to pass on. */
+    private fun DeviceState.linkStamped() = copy(shoppingLinkAt = maxOf(now(), shoppingLinkAt + 1), shoppingLinkBy = device)
 
     /** The sublist [name] went on last time, if it is still on the list. */
     fun sublistFor(name: String): Sublist? {
@@ -345,22 +415,45 @@ class PantryRepository(
         return doc.visibleSections().firstOrNull { nameKey(it.name) == nameKey(remembered) }?.let { Sublist.Existing(it.id) }
     }
 
+    /** What [food] is called on the shopping list: what the user called it there before, else its own name. */
+    fun shoppingNameFor(food: String): String = _memory.value.food(food)?.let { it.shoppingName ?: it.name } ?: food.trim()
+
+    /** Items of the shopping list that may already be [text], ticked or not: the same name, or a similar one. */
+    fun similarOnList(text: String): List<Item> = _shopping.value?.doc?.similarItems(text).orEmpty()
+
     /**
-     * Puts [name] on the shopping list in [sublist], and remembers the sublist for next time. A ticked
-     * item of that name there is unticked rather than added again.
+     * Puts [food] on the shopping list as [text] (its name there), in [sublist], and remembers both for
+     * next time. An item of that name still to buy is left as it is, and a ticked one there is unticked,
+     * rather than added again.
      */
-    fun addToShopping(name: String, sublist: Sublist) {
+    fun addToShopping(food: String, text: String, sublist: Sublist) {
         val current = _shopping.value ?: return
+        current.doc.pending(text)?.let { return useShoppingItem(food, it.id) }
         var doc = current.doc
         val section = when (sublist) {
             Sublist.None -> null
             is Sublist.Existing -> sublist.id
             is Sublist.New -> listEditor.addSection(doc, sublist.name).let { (withSection, id) -> doc = withSection; id }
         }
-        doc = listEditor.putOnList(doc, section, name)
+        doc = listEditor.putOnList(doc, section, text)
         val sectionName = section?.let { id -> doc.sections.firstOrNull { it.id == id }?.name }.orEmpty()
-        setMemory(_memory.value.wentOnSublist(name, sectionName))
+        learnNow(_memory.value.wentOnList(food, text, sectionName))
         changeShopping(doc)
+    }
+
+    /** Puts [name] on the shopping list in [sublist], as itself; see the other [addToShopping]. */
+    fun addToShopping(name: String, sublist: Sublist) = addToShopping(name, name, sublist)
+
+    /**
+     * Takes the shopping list's item [id] for [food]: it goes back on the list if it was ticked, and is
+     * what [food] is called there, in its sublist, from now on.
+     */
+    fun useShoppingItem(food: String, id: String) {
+        val doc = _shopping.value?.doc ?: return
+        val item = doc.items.firstOrNull { it.id == id && !it.deleted } ?: return
+        val sectionName = item.section?.let { section -> doc.visibleSections().firstOrNull { it.id == section }?.name }.orEmpty()
+        learnNow(_memory.value.wentOnList(food, item.text, sectionName))
+        if (item.done) changeShopping(listEditor.setDone(doc, id, false))
     }
 
     /** Ticks or unticks an item of the shopping list. */
@@ -382,7 +475,11 @@ class PantryRepository(
         scheduleSync(syncDelayMillis)
     }
 
-    fun syncShopping() = scheduleSync(0)
+    /** Syncs the shopping list, and the pantry when it is shared, now: when the app is opened again, say. */
+    fun syncNow() {
+        schedulePantrySync(0)
+        scheduleSync(0)
+    }
 
     private fun scheduleSync(delayMillis: Long) {
         if (_shopping.value == null) return
@@ -414,15 +511,202 @@ class PantryRepository(
         }
     }
 
+    // Sharing the pantry
+
+    /**
+     * Shares the pantry, and what the app has learned, through the Nextcloud folder or file behind
+     * [link], with every device that uses the same link. In a folder without a pantry, this device's is
+     * saved there, in a file called [name] (".pantry" added); a pantry already there is joined. Joining
+     * when this device has spaces or food of its own, [JoinChoiceNeeded] asks how they come together,
+     * unless [join] says. A folder holding several pantries makes [PantryChoiceNeeded] list them; the
+     * caller passes the chosen one's [ShareLink.fileName]. Nothing changes here unless it all works.
+     */
+    suspend fun sharePantry(link: ShareLink, name: String, join: JoinMode? = null) {
+        var target = ShareLinks.normalize(link)
+        val share = nextcloudShareFor(target, http) ?: run {
+            // Says what is wrong with other kinds of links.
+            remoteFileFor(target, http)
+            throw RemoteException(Messages.current.notAShareLink)
+        }
+        share.resolve()
+        // A list linked before pantries were shared gets a stamp now, to be passed on.
+        if (device.shoppingLink != null && device.shoppingLinkAt == 0L) saveDevice(device.linkStamped())
+        if (share.isFolder && target.fileName == null) {
+            val pantries = share.pantries()
+            when (pantries.size) {
+                0 -> {
+                    val mine = localShared()
+                    val fileName = share.createFile(name, SharedPantry.EXTENSION, SharedPantryCodec.encode(mine))
+                    startSharing(target.copy(fileName = fileName), mine)
+                    return
+                }
+                1 -> target = target.copy(fileName = pantries.single().fileName)
+                else -> throw PantryChoiceNeeded(target, pantries)
+            }
+        }
+        val remote = NextcloudPublicFile(share, target.fileName)
+        val shared = remote.read().text?.takeIf { it.isNotBlank() }?.let(SharedPantryCodec::decode)
+        val start = when {
+            shared == null -> localShared()
+            join == JoinMode.Replace -> {
+                keepAside()
+                shared.copy(shoppingList = householdList(shared))
+            }
+            join == JoinMode.Merge || !hasOwnPantry() -> joinedWith(shared)
+            else -> throw JoinChoiceNeeded(target)
+        }
+        pendingPantrySync?.cancel()
+        startSharing(target, syncDocument(remote, start, PantryFormat))
+    }
+
+    /**
+     * Stops sharing the pantry on this device, which keeps the pantry as it is now; the shared file
+     * stays, for the other devices.
+     */
+    suspend fun stopSharingPantry() {
+        pendingPantrySync?.cancel()
+        _sharing.value = null
+        saveDevice(device.copy(pantryLink = null, pantrySyncedAt = null))
+    }
+
+    /** Runs one sync of the shared pantry; a failure is recorded on [sharing], not thrown. */
+    suspend fun syncPantry() = pantryLock.withLock {
+        val link = device.pantryLink ?: return@withLock
+        _sharing.update { it?.copy(sync = SyncState.Syncing) }
+        try {
+            val merged = syncDocument(remoteFileFor(link, http), localShared(), PantryFormat)
+            if (device.pantryLink != link) return@withLock
+            // What was changed here meanwhile stays, and goes out with the next round.
+            val combined = localShared().merge(merged)
+            show(combined)
+            adoptShoppingList(combined.shoppingList)
+            _sharing.update { if (it?.link == link) it.copy(sync = SyncState.Synced(now())) else it }
+            saveDevice(device.copy(pantrySyncedAt = now()))
+            if (combined != merged) schedulePantrySync(syncDelayMillis)
+        } catch (e: RemoteException) {
+            _sharing.update { if (it?.link == link) it.copy(sync = SyncState.Failed(e.message ?: Messages.current.syncFailed)) else it }
+        }
+    }
+
+    private fun schedulePantrySync(delayMillis: Long) {
+        if (device.pantryLink == null) return
+        pendingPantrySync?.cancel()
+        pendingPantrySync = scope.launch {
+            delay(delayMillis)
+            syncPantry()
+        }
+    }
+
+    /** The pantry, what was learned and the shopping list, as this device would share them. */
+    private fun localShared(): SharedPantry {
+        val doc = _pantry.value.pruned(now())
+        return SharedPantry(
+            spaces = doc.spaces,
+            items = doc.items,
+            memory = _memory.value,
+            shoppingList = if (device.shoppingLinkAt > 0) SharedShoppingList(device.shoppingLink, device.shoppingLinkAt, device.shoppingLinkBy) else null,
+        )
+    }
+
+    private fun hasOwnPantry(): Boolean = _pantry.value.visibleSpaces().isNotEmpty() || _pantry.value.liveItems().isNotEmpty()
+
+    /**
+     * This device's pantry joined to [shared]: its spaces become the shared spaces of the same name,
+     * the others are added; its food is added; what it learned adds to what the shared pantry knows.
+     */
+    private fun joinedWith(shared: SharedPantry): SharedPantry {
+        val mine = _pantry.value
+        val theirs = shared.pantry.visibleSpaces()
+        val ids = mine.visibleSpaces().mapNotNull { space ->
+            theirs.firstOrNull { nameKey(it.name) == nameKey(space.name) }?.let { space.id to it.id }
+        }.toMap()
+        val stamp = maxOf(shared.memory.nextStamp(now(), device.device), stamp(), compareBy { it.at })
+        return SharedPantry(
+            spaces = mergeStamped(shared.spaces, mine.spaces.filterNot { it.id in ids }),
+            items = mergeStamped(shared.items, mine.items.map { if (it.space in ids) it.copy(space = ids.getValue(it.space)) else it }),
+            memory = shared.memory.changedTo(shared.memory.combinedWith(_memory.value.withSpaces(ids)), stamp),
+            shoppingList = householdList(shared),
+        )
+    }
+
+    /** The shopping list of a pantry this device joins: the household's, or this device's if it has none. */
+    private fun householdList(shared: SharedPantry): SharedShoppingList? {
+        shared.shoppingList?.takeIf { it.link != null }?.let { return it }
+        val mine = device.shoppingLink ?: return shared.shoppingList
+        return SharedShoppingList(mine, maxOf(now(), device.shoppingLinkAt, (shared.shoppingList?.at ?: 0) + 1), device.device)
+    }
+
+    /** Keeps this device's pantry and what it learned in files of their own, before a shared pantry replaces them. */
+    private suspend fun keepAside() {
+        val time = now()
+        saveLock.withLock {
+            files.write("pantry-before-sharing-$time.json", PantryCodec.encode(_pantry.value))
+            files.write("memory-before-sharing-$time.json", json.encodeToString(Memory.serializer(), _memory.value))
+        }
+    }
+
+    private suspend fun startSharing(link: ShareLink, shared: SharedPantry) {
+        pendingPantrySync?.cancel()
+        // An undo would now take back food that may be another device's.
+        lastUndo = null
+        show(shared)
+        _sharing.value = PantrySharing(link, SyncState.Synced(now()))
+        saveDevice(device.copy(pantryLink = link, pantrySyncedAt = now()))
+        adoptShoppingList(shared.shoppingList)
+    }
+
+    /**
+     * Follows the shared pantry's shopping list when another device linked or unlinked one after this
+     * device last did.
+     */
+    private suspend fun adoptShoppingList(shared: SharedShoppingList?) {
+        if (shared == null || compareStamps(shared.at, shared.by, device.shoppingLinkAt, device.shoppingLinkBy) <= 0) return
+        if (shared.link == device.shoppingLink) {
+            saveDevice(device.copy(shoppingLinkAt = shared.at, shoppingLinkBy = shared.by))
+            return
+        }
+        pendingSync?.cancel()
+        saveLock.withLock { files.delete(SHOPPING) }
+        _shopping.value = shared.link?.let { ShoppingList(it, ListDocument(), SyncState.Syncing) }
+        saveDevice(
+            device.copy(
+                shoppingLink = shared.link,
+                shoppingSyncedAt = null,
+                shoppingCollapsed = emptySet(),
+                shoppingLinkAt = shared.at,
+                shoppingLinkBy = shared.by,
+            ),
+        )
+        scheduleSync(0)
+    }
+
     // Storage
 
+    /** The pantry as changed on this device: saved, and passed on to the shared pantry shortly. */
     private fun setPantry(doc: PantryDocument) {
+        showPantry(doc)
+        schedulePantrySync(syncDelayMillis)
+    }
+
+    /** What the app knows as changed on this device: saved, and passed on to the shared pantry shortly. */
+    private fun setMemory(memory: Memory) {
+        if (memory == _memory.value) return
+        showMemory(memory)
+        schedulePantrySync(syncDelayMillis)
+    }
+
+    /** The shared pantry as synced: shown and saved, with nothing to pass on. */
+    private fun show(shared: SharedPantry) {
+        showPantry(shared.pantry)
+        if (shared.memory != _memory.value) showMemory(shared.memory)
+    }
+
+    private fun showPantry(doc: PantryDocument) {
         _pantry.value = doc
         scope.launch { saveLock.withLock { files.write(PANTRY, PantryCodec.encode(_pantry.value.pruned(now()))) } }
     }
 
-    private fun setMemory(memory: Memory) {
-        if (memory == _memory.value) return
+    private fun showMemory(memory: Memory) {
         _memory.value = memory
         scope.launch { save(MEMORY, Memory.serializer(), _memory.value) }
     }

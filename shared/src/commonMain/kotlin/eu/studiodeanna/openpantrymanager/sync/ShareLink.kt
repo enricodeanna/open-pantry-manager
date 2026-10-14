@@ -59,3 +59,22 @@ object ShareLinks {
     }
 }
 
+/** The highest [shareFileName] number tried before a name counts as taken, "Dispensa (99).pantry". */
+internal const val MAX_FILE_NUMBER = 99
+
+private val NOT_IN_FILE_NAMES = Regex("""[/\\:*?"<>|\u0000-\u001f]""")
+
+/**
+ * The file name for [title] with [extension]: the title with characters that are not allowed in file
+ * names replaced, and for [n] > 1 the number Nextcloud itself adds to duplicates, "Dispensa (2).pantry".
+ */
+fun shareFileName(title: String, extension: String, n: Int = 1): String {
+    val base = title
+        .replace(NOT_IN_FILE_NAMES, "-")
+        .trim()
+        .trimStart('.')
+        .take(100)
+        .trim()
+        .ifEmpty { "Pantry" }
+    return if (n <= 1) "$base$extension" else "$base ($n)$extension"
+}

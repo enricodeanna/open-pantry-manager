@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AssistChip
@@ -66,6 +68,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.studiodeanna.openpantrymanager.PantryRepository
+import eu.studiodeanna.openpantrymanager.SyncState
 import eu.studiodeanna.openpantrymanager.UndoStep
 import eu.studiodeanna.openpantrymanager.model.ItemOrder
 import eu.studiodeanna.openpantrymanager.model.PantryItem
@@ -87,6 +90,7 @@ private sealed interface Dialog {
     data class Move(val item: PantryItem) : Dialog
     data class Shopping(val name: String) : Dialog
     data object LinkShopping : Dialog
+    data object SharePantry : Dialog
     data object Settings : Dialog
 }
 
@@ -107,6 +111,7 @@ fun PantryScreen(
     val settings by repository.settings.collectAsState()
     val collapsed by repository.collapsedSpaces.collectAsState()
     val shopping by repository.shopping.collectAsState()
+    val sharing by repository.sharing.collectAsState()
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -205,6 +210,7 @@ fun PantryScreen(
                                     }
                                 }
                                 HorizontalDivider()
+                                if (sharing == null) MenuItem(strings.sharePantry) { menu = false; dialog = Dialog.SharePantry }
                                 MenuItem(strings.settings) { menu = false; dialog = Dialog.Settings }
                             }
                         }
@@ -224,13 +230,37 @@ fun PantryScreen(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
             if (spaces.isEmpty()) {
-                FirstSpaces(onAdd = { repository.addSpace(it) }, onOther = { dialog = Dialog.AddSpace })
+                FirstSpaces(
+                    onAdd = { repository.addSpace(it) },
+                    onOther = { dialog = Dialog.AddSpace },
+                    onShare = { dialog = Dialog.SharePantry }.takeIf { sharing == null },
+                )
                 return@Box
             }
             LazyColumn(
                 modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
                 contentPadding = PaddingValues(bottom = 96.dp),
             ) {
+                (sharing?.sync as? SyncState.Failed)?.let { failed ->
+                    item(key = "sharing-problem") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(16.dp)
+                                .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+                                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                strings.sharedPantryProblem(failed.message),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { repository.syncNow() }) {
+                                Text(strings.retry, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
                 val q = query
                 if (q != null) {
                     searchResults(spaces, grouped, q, today, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }) {
@@ -353,12 +383,19 @@ fun PantryScreen(
             name = d.name,
             shopping = shopping,
             suggested = repository.sublistFor(d.name),
+            similar = repository::similarOnList,
+            initialText = repository.shoppingNameFor(d.name),
             onDismiss = { dialog = null },
             onLink = { dialog = Dialog.LinkShopping },
-            onAdd = { name, sublist ->
+            onAdd = { text, sublist ->
                 dialog = null
-                repository.addToShopping(name, sublist)
-                announce(texts.onShoppingList(name), null)
+                repository.addToShopping(d.name, text, sublist)
+                announce(texts.onShoppingList(text), null)
+            },
+            onUse = { item ->
+                dialog = null
+                repository.useShoppingItem(d.name, item.id)
+                announce(if (item.done) texts.onShoppingList(item.text) else texts.alreadyOnShoppingList(item.text), null)
             },
         )
         Dialog.LinkShopping -> LinkShoppingFlow(
@@ -366,12 +403,21 @@ fun PantryScreen(
             onDismiss = { dialog = null },
             onDone = { dialog = null },
         )
+        Dialog.SharePantry -> SharePantryFlow(
+            share = { link, join -> repository.sharePantry(link, texts.pantry, join) },
+            onDismiss = { dialog = null },
+            onDone = { dialog = null },
+        )
         Dialog.Settings -> SettingsDialog(
             settings = settings,
             shopping = shopping,
+            sharing = sharing,
             onChange = { scope.launch { repository.updateSettings(it) } },
             onLinkShopping = { dialog = Dialog.LinkShopping },
             onUnlinkShopping = { scope.launch { repository.unlinkShoppingList() } },
+            onSharePantry = { dialog = Dialog.SharePantry },
+            onStopSharing = { scope.launch { repository.stopSharingPantry() } },
+            onSyncNow = { repository.syncNow() },
             onDismiss = { dialog = null },
         )
     }
@@ -386,7 +432,7 @@ private fun MenuItem(text: String, enabled: Boolean = true, onClick: () -> Unit)
 
 /** With no spaces yet: suggests the usual ones, one tap each, or any other name. */
 @Composable
-private fun FirstSpaces(onAdd: (String) -> Unit, onOther: () -> Unit) {
+private fun FirstSpaces(onAdd: (String) -> Unit, onOther: () -> Unit, onShare: (() -> Unit)?) {
     Column(
         Modifier.widthIn(max = 480.dp).fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
@@ -405,6 +451,8 @@ private fun FirstSpaces(onAdd: (String) -> Unit, onOther: () -> Unit) {
             }
         }
         TextButton(onClick = onOther) { Text(strings.otherSpace) }
+        // A second phone joins the pantry another one shares.
+        onShare?.let { TextButton(onClick = it) { Text(strings.useSharedPantry) } }
     }
 }
 

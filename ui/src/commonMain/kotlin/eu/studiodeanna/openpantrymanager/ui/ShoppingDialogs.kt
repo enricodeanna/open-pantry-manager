@@ -25,35 +25,44 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import eu.studiodeanna.openpantrymanager.ListChoiceNeeded
 import eu.studiodeanna.openpantrymanager.ShoppingList
 import eu.studiodeanna.openpantrymanager.Sublist
-import eu.studiodeanna.openpantrymanager.checklist.pending
+import eu.studiodeanna.openpantrymanager.checklist.Item
 import eu.studiodeanna.openpantrymanager.checklist.visibleSections
+import eu.studiodeanna.openpantrymanager.model.nameKey
 import eu.studiodeanna.openpantrymanager.sync.RemoteException
 import eu.studiodeanna.openpantrymanager.sync.ShareLink
 import eu.studiodeanna.openpantrymanager.sync.SharePasswordRequired
+import eu.studiodeanna.openpantrymanager.sync.SharedList
 import kotlinx.coroutines.launch
 
 /**
- * Asks whether to put [name] on the shopping list, and in which sublist: the ones the list has, none,
- * or a new one. [suggested] is where it went last time. With [askName], the name is typed here (adding
- * from the shopping list itself). Without a linked list it offers to link one instead.
+ * Asks whether to put [name] on the shopping list, as what ([initialText], editable), and in which
+ * sublist: the ones the list has, none, or a new one; [suggested] is where it went last time. Items
+ * already on the list that may be it ([similar]) are offered instead, ticked or not: picking one puts it
+ * back on the list ([onUse]). With [askName] the name is typed here (adding from the shopping list
+ * itself). Without a linked list it offers to link one instead.
  */
 @Composable
 fun ShoppingPromptDialog(
     name: String,
     shopping: ShoppingList?,
     suggested: Sublist?,
+    similar: (String) -> List<Item>,
+    initialText: String = name,
     askName: Boolean = false,
     onDismiss: () -> Unit,
     onLink: () -> Unit,
-    onAdd: (name: String, sublist: Sublist) -> Unit,
+    onAdd: (text: String, sublist: Sublist) -> Unit,
+    onUse: (Item) -> Unit,
 ) {
     if (shopping == null) {
         AlertDialog(
@@ -66,75 +75,104 @@ fun ShoppingPromptDialog(
         return
     }
     val sections = shopping.doc.visibleSections()
-    val already = if (askName) null else shopping.doc.pending(name)
-    if (already != null) {
-        val section = sections.firstOrNull { it.id == already.section }?.name
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(strings.finishedTitle(name)) },
-            text = { Text(strings.alreadyOnList(name, section)) },
-            confirmButton = { TextButton(onClick = onDismiss) { Text(strings.ok) } },
-        )
-        return
+    var text by remember { mutableStateOf(TextFieldValue(initialText, TextRange(initialText.length))) }
+    val matches = remember(text.text, shopping.doc) { similar(text.text) }
+    // What the user picked; until they do, an item of the very same name is taken.
+    var picked by remember { mutableStateOf<String?>(null) }
+    var pickedNew by remember { mutableStateOf(false) }
+    val use = when {
+        pickedNew -> null
+        else -> matches.firstOrNull { it.id == picked } ?: matches.firstOrNull { nameKey(it.text) == nameKey(text.text) }
     }
-    var text by remember { mutableStateOf(name) }
     var choice by remember {
         mutableStateOf(suggested?.takeIf { s -> s !is Sublist.Existing || sections.any { it.id == s.id } } ?: Sublist.None)
     }
     var newName by remember { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     val chosen = if (choice is Sublist.New) Sublist.New(newName.trim()) else choice
-    val ok = text.isNotBlank() && (chosen !is Sublist.New || chosen.name.isNotEmpty())
+    val ok = use != null || (text.text.isNotBlank() && (chosen !is Sublist.New || chosen.name.isNotEmpty()))
+
+    fun confirm() {
+        when {
+            !ok -> Unit
+            use != null -> onUse(use)
+            else -> onAdd(text.text.trim(), chosen)
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (askName) strings.addToShopping else strings.putOnShoppingList(name)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (askName) {
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text(strings.food) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                        modifier = Modifier.fillMaxWidth().focusRequester(focus).padding(bottom = 8.dp),
-                    )
-                    LaunchedEffect(Unit) { focus.requestFocus() }
-                } else {
-                    Text(strings.onList(shopping.doc.title), style = MaterialTheme.typography.bodyMedium)
+                if (!askName) Text(strings.onList(shopping.doc.title), style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(strings.nameOnList) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { confirm() }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus).padding(top = 8.dp, bottom = 4.dp),
+                )
+                if (askName) LaunchedEffect(Unit) { focus.requestFocus() }
+                if (matches.isNotEmpty()) {
+                    Text(strings.alreadyOnListHeading, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+                    matches.forEach { item ->
+                        val section = sections.firstOrNull { it.id == item.section }?.name
+                        ChoiceRow(strings.listItemChoice(item.text, section, item.done), use?.id == item.id) {
+                            picked = item.id
+                            pickedNew = false
+                        }
+                    }
+                    ChoiceRow(strings.addAsNew, use == null) {
+                        pickedNew = true
+                        picked = null
+                    }
                 }
-                Text(strings.sublist, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
-                sections.forEach { section ->
-                    val label = if (suggested == Sublist.Existing(section.id)) "${section.name} ★" else section.name
-                    ChoiceRow(label, choice == Sublist.Existing(section.id)) { choice = Sublist.Existing(section.id) }
-                }
-                ChoiceRow(strings.noSublist, choice == Sublist.None) { choice = Sublist.None }
-                ChoiceRow(strings.newSublist, choice is Sublist.New) { choice = Sublist.New("") }
-                if (choice is Sublist.New) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text(strings.sublistName) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { if (ok) onAdd(text.trim(), chosen) }),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                if (use == null) {
+                    Text(strings.sublist, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+                    sections.forEach { section ->
+                        val label = if (suggested == Sublist.Existing(section.id)) "${section.name} ★" else section.name
+                        ChoiceRow(label, choice == Sublist.Existing(section.id)) { choice = Sublist.Existing(section.id) }
+                    }
+                    ChoiceRow(strings.noSublist, choice == Sublist.None) { choice = Sublist.None }
+                    ChoiceRow(strings.newSublist, choice is Sublist.New) { choice = Sublist.New("") }
+                    if (choice is Sublist.New) {
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            label = { Text(strings.sublistName) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { confirm() }),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onAdd(text.trim(), chosen) }, enabled = ok) { Text(strings.add) } },
+        confirmButton = {
+            TextButton(onClick = ::confirm, enabled = ok) { Text(if (use != null && !use.done) strings.ok else strings.add) }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(strings.notNow) } },
     )
 }
 
 /**
- * Asks for the share link of an Open Check Lists list, then runs [connect]; stays open showing the
- * error if that fails, and calls [onDone] when it returns true (false: another dialog takes over).
- * The password field appears once a share turns out to need one.
+ * Asks for a share link (an Open Check Lists list's, unless [title] and [intro] say otherwise), then
+ * runs [connect]; stays open showing the error if that fails, and calls [onDone] when it returns true
+ * (false: another dialog takes over). The password field appears once a share turns out to need one.
  */
 @Composable
-fun LinkDialog(onDismiss: () -> Unit, onDone: () -> Unit, connect: suspend (ShareLink) -> Boolean) {
+fun LinkDialog(
+    onDismiss: () -> Unit,
+    onDone: () -> Unit,
+    title: String = strings.linkShoppingList,
+    intro: String = strings.linkIntro,
+    confirmLabel: String = strings.link,
+    connect: suspend (ShareLink) -> Boolean,
+) {
     var url by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var askPassword by remember { mutableStateOf(false) }
@@ -164,10 +202,10 @@ fun LinkDialog(onDismiss: () -> Unit, onDone: () -> Unit, connect: suspend (Shar
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(strings.linkShoppingList) },
+        title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(strings.linkIntro, style = MaterialTheme.typography.bodyMedium)
+                Text(intro, style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
@@ -199,7 +237,7 @@ fun LinkDialog(onDismiss: () -> Unit, onDone: () -> Unit, connect: suspend (Shar
         },
         confirmButton = {
             TextButton(onClick = ::submit, enabled = url.isNotBlank() && !busy) {
-                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text(strings.link)
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text(confirmLabel)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(strings.cancel) } },
@@ -208,17 +246,28 @@ fun LinkDialog(onDismiss: () -> Unit, onDone: () -> Unit, connect: suspend (Shar
 
 /** Lets the user pick one of the lists in a shared folder. */
 @Composable
-fun ListChoiceDialog(choice: ListChoiceNeeded, onDismiss: () -> Unit, open: suspend (fileName: String) -> Unit) {
+fun ListChoiceDialog(choice: ListChoiceNeeded, onDismiss: () -> Unit, open: suspend (fileName: String) -> Unit) =
+    FileChoiceDialog(strings.whichList, strings.severalLists, choice.lists, onDismiss, open)
+
+/** Lets the user pick one of the [files] (lists, pantries) in a shared folder. */
+@Composable
+fun FileChoiceDialog(
+    title: String,
+    intro: String,
+    files: List<SharedList>,
+    onDismiss: () -> Unit,
+    open: suspend (fileName: String) -> Unit,
+) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(strings.whichList) },
+        title = { Text(title) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(strings.severalLists, style = MaterialTheme.typography.bodyMedium)
-                choice.lists.forEach { list ->
+                Text(intro, style = MaterialTheme.typography.bodyMedium)
+                files.forEach { list ->
                     TextButton(
                         onClick = {
                             busy = true

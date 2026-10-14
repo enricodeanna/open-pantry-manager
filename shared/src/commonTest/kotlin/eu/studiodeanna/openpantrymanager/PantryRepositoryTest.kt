@@ -155,4 +155,30 @@ class PantryRepositoryTest {
         repo.linkShoppingList(choice.link.copy(fileName = "Hardware.json"))
         assertEquals("Hardware", repo.shopping.value?.doc?.title)
     }
+
+    @Test
+    fun findsWhatIsOnTheListAlreadyAndRemembersWhatFoodIsCalledThere() = runTest {
+        val cloud = FakeNextcloud(folder = true)
+        cloud.overwrite(openCheckListsFile, "Groceries.json")
+        val repo = repository(cloud.http)
+        repo.load()
+        repo.linkShoppingList(cloud.link)
+
+        // Milk is ticked in Dairy: picked for "Milk, semi-skimmed", it goes back on the list, and is its name there.
+        val milk = repo.similarOnList("Milk, semi-skimmed").single()
+        assertEquals("Milk" to true, milk.text to milk.done)
+        repo.useShoppingItem("Milk, semi-skimmed", milk.id)
+        assertEquals(false, repo.shopping.value!!.doc.items.single { it.id == milk.id }.done)
+        assertEquals("Milk", repo.shoppingNameFor("milk semi skimmed"))
+        assertEquals(Sublist.Existing("dairy0000001"), repo.sublistFor("Milk, semi-skimmed"))
+
+        // A name typed for the list is remembered too; the food's own name is not stored twice.
+        repo.addToShopping("Pane comune", "Bread", Sublist.None)
+        assertEquals("Bread", repo.shoppingNameFor("Pane comune"))
+        repo.addToShopping("Apples", Sublist.None)
+        assertEquals("Apples", repo.shoppingNameFor("apples"))
+        assertNull(repo.food("apples")!!.shoppingName)
+        // Bread was pending already: not added twice.
+        assertEquals(1, repo.shopping.value!!.doc.items.count { it.text == "Bread" && !it.deleted })
+    }
 }

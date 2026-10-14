@@ -102,8 +102,12 @@ interface Strings {
     // Shopping list
     fun finishedTitle(name: String): String
     val linkToAddFinished: String
-    fun alreadyOnList(name: String, sublist: String?): String
     val addToShopping: String
+    val nameOnList: String
+    val alreadyOnListHeading: String
+    fun listItemChoice(text: String, sublist: String?, ticked: Boolean): String
+    val addAsNew: String
+    fun alreadyOnShoppingList(name: String): String
     fun putOnShoppingList(name: String): String
     fun onList(title: String): String
     val sublist: String
@@ -130,6 +134,24 @@ interface Strings {
     fun syncedMinutesAgo(minutes: Long): String
     fun syncedHoursAgo(hours: Long): String
     fun syncedDaysAgo(days: Long): String
+
+    // Sharing the pantry
+    val sharePantry: String
+    val useSharedPantry: String
+    val sharePantryIntro: String
+    val share: String
+    val whichPantry: String
+    val severalPantries: String
+    val joinTitle: String
+    val joinMessage: String
+    val joinMerge: String
+    val joinReplace: String
+    val sharedPantry: String
+    val notShared: String
+    fun sharedAs(file: String): String
+    val addressForOthers: String
+    val stopSharing: String
+    fun sharedPantryProblem(message: String): String
 
     // Receipts
     val receipt: String
@@ -254,9 +276,13 @@ object EnglishStrings : Strings {
     override fun finishedTitle(name: String) = "$name is finished"
     override val linkToAddFinished =
         "Link a shopping list from Open Check Lists, and finished food can go straight on it."
-    override fun alreadyOnList(name: String, sublist: String?) =
-        "$name is already on the shopping list" + (sublist?.let { ", in $it." } ?: ".")
     override val addToShopping = "Add to the shopping list"
+    override val nameOnList = "Name on the list"
+    override val alreadyOnListHeading = "Already on the list"
+    override fun listItemChoice(text: String, sublist: String?, ticked: Boolean) =
+        text + (sublist?.let { " · $it" } ?: "") + if (ticked) " · ticked, put it back" else " · still to buy"
+    override val addAsNew = "Add as a new item"
+    override fun alreadyOnShoppingList(name: String) = "$name was on the shopping list already"
     override fun putOnShoppingList(name: String) = "Put $name on the shopping list?"
     override fun onList(title: String) = "On “$title”."
     override val sublist = "Sublist"
@@ -285,6 +311,25 @@ object EnglishStrings : Strings {
     override fun syncedMinutesAgo(minutes: Long) = "Synced $minutes min ago"
     override fun syncedHoursAgo(hours: Long) = if (hours == 1L) "Synced an hour ago" else "Synced $hours hours ago"
     override fun syncedDaysAgo(days: Long) = "Synced $days days ago"
+
+    override val sharePantry = "Share the pantry"
+    override val useSharedPantry = "Use a pantry shared from another phone"
+    override val sharePantryIntro =
+        "In Nextcloud, share a folder by link with editing allowed, then copy the link and paste it here. The pantry " +
+            "is kept there, with what the app has learned and the shopping list. On another phone, paste the same link."
+    override val share = "Share"
+    override val whichPantry = "Which pantry?"
+    override val severalPantries = "This shared folder holds several pantries."
+    override val joinTitle = "This phone has a pantry of its own"
+    override val joinMessage = "The shared pantry exists already. What should happen to the spaces and food on this phone?"
+    override val joinMerge = "Add them to the shared pantry; spaces with the same name become one"
+    override val joinReplace = "Use only the shared pantry; this phone's is kept aside in a file"
+    override val sharedPantry = "Shared pantry"
+    override val notShared = "This pantry is on this phone only."
+    override fun sharedAs(file: String) = "Shared through Nextcloud, as “$file”."
+    override val addressForOthers = "To share it on another phone, paste this address there:"
+    override val stopSharing = "Stop sharing on this phone"
+    override fun sharedPantryProblem(message: String) = "Shared pantry: $message"
 
     override val receipt = "Receipt"
     override val photoHint =
@@ -412,9 +457,13 @@ object ItalianStrings : Strings {
     override fun finishedTitle(name: String) = "Finito: $name"
     override val linkToAddFinished =
         "Collega una lista della spesa di Open Check Lists, e ciò che finisce può andarci direttamente."
-    override fun alreadyOnList(name: String, sublist: String?) =
-        "$name è già nella lista della spesa" + (sublist?.let { ", in $it." } ?: ".")
     override val addToShopping = "Aggiungi alla lista della spesa"
+    override val nameOnList = "Nome nella lista"
+    override val alreadyOnListHeading = "Già nella lista"
+    override fun listItemChoice(text: String, sublist: String?, ticked: Boolean) =
+        text + (sublist?.let { " · $it" } ?: "") + if (ticked) " · spuntato, rimettilo" else " · da comprare"
+    override val addAsNew = "Aggiungi come nuova voce"
+    override fun alreadyOnShoppingList(name: String) = "$name era già nella lista della spesa"
     override fun putOnShoppingList(name: String) = "Mettere $name nella lista della spesa?"
     override fun onList(title: String) = "In “$title”."
     override val sublist = "Sottolista"
@@ -443,6 +492,25 @@ object ItalianStrings : Strings {
     override fun syncedMinutesAgo(minutes: Long) = "Sincronizzata $minutes min fa"
     override fun syncedHoursAgo(hours: Long) = if (hours == 1L) "Sincronizzata un'ora fa" else "Sincronizzata $hours ore fa"
     override fun syncedDaysAgo(days: Long) = "Sincronizzata $days giorni fa"
+
+    override val sharePantry = "Condividi la dispensa"
+    override val useSharedPantry = "Usa una dispensa condivisa da un altro telefono"
+    override val sharePantryIntro =
+        "In Nextcloud condividi una cartella tramite link, permettendo la modifica, poi copia il link e incollalo qui. " +
+            "La dispensa viene tenuta lì, con ciò che l'app ha imparato e la lista della spesa. Su un altro telefono incolla lo stesso link."
+    override val share = "Condividi"
+    override val whichPantry = "Quale dispensa?"
+    override val severalPantries = "Questa cartella condivisa contiene più dispense."
+    override val joinTitle = "Questo telefono ha già una sua dispensa"
+    override val joinMessage = "La dispensa condivisa esiste già. Cosa fare degli spazi e degli alimenti di questo telefono?"
+    override val joinMerge = "Aggiungerli alla dispensa condivisa; gli spazi con lo stesso nome diventano uno"
+    override val joinReplace = "Usare solo la dispensa condivisa; quella di questo telefono viene conservata a parte in un file"
+    override val sharedPantry = "Dispensa condivisa"
+    override val notShared = "Questa dispensa è solo su questo telefono."
+    override fun sharedAs(file: String) = "Condivisa tramite Nextcloud, come “$file”."
+    override val addressForOthers = "Per condividerla su un altro telefono, incolla lì questo indirizzo:"
+    override val stopSharing = "Smetti di condividere su questo telefono"
+    override fun sharedPantryProblem(message: String) = "Dispensa condivisa: $message"
 
     override val receipt = "Scontrino"
     override val photoHint =

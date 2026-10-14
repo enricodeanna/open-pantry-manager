@@ -27,6 +27,11 @@ interface Messages {
     val noCameraApp: String
     val photoUnreadable: String
 
+    val notAPantry: String
+    val newerPantry: String
+    val choosePantry: String
+    fun folderNameTaken(title: String): String
+
     companion object {
         var current: Messages = EnglishMessages
     }
@@ -58,6 +63,11 @@ object EnglishMessages : Messages {
 
     override val noCameraApp = "There is no camera app to take the photo with."
     override val photoUnreadable = "The text on the photo could not be read."
+
+    override val notAPantry = "This file is not a pantry of Open Pantry Manager."
+    override val newerPantry = "This pantry was saved by a newer version of Open Pantry Manager. Update the app to use it."
+    override val choosePantry = "Choose which pantry to use."
+    override fun folderNameTaken(title: String) = "This folder already has too many files called “$title”."
 }
 
 object ItalianMessages : Messages {
@@ -88,4 +98,10 @@ object ItalianMessages : Messages {
 
     override val noCameraApp = "Non c'è un'app fotocamera con cui scattare la foto."
     override val photoUnreadable = "Non è stato possibile leggere il testo della foto."
+
+    override val notAPantry = "Questo file non è una dispensa di Open Pantry Manager."
+    override val newerPantry =
+        "Questa dispensa è stata salvata da una versione più recente di Open Pantry Manager. Aggiorna l'app per usarla."
+    override val choosePantry = "Scegli quale dispensa usare."
+    override fun folderNameTaken(title: String) = "Questa cartella ha già troppi file chiamati “$title”."
 }

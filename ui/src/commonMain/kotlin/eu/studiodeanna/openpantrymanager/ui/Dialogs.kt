@@ -14,6 +14,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -43,16 +44,20 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import eu.studiodeanna.openpantrymanager.PantrySharing
 import eu.studiodeanna.openpantrymanager.ShoppingList
+import eu.studiodeanna.openpantrymanager.SyncState
 import eu.studiodeanna.openpantrymanager.model.Space
 import eu.studiodeanna.openpantrymanager.store.LanguageChoice
 import eu.studiodeanna.openpantrymanager.store.Settings
 import eu.studiodeanna.openpantrymanager.store.ThemeChoice
+import eu.studiodeanna.openpantrymanager.sync.ShareLinks
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.plus
@@ -248,16 +253,20 @@ fun AddSpaceDialog(taken: Collection<String>, onDismiss: () -> Unit, onAdd: (Str
 }
 
 /**
- * Theme, language, whether finished food is offered for the shopping list, and which list that is;
- * each change applies and is saved at once.
+ * Whether the pantry is shared, theme, language, whether finished food is offered for the shopping
+ * list, and which list that is; each change applies and is saved at once.
  */
 @Composable
 fun SettingsDialog(
     settings: Settings,
     shopping: ShoppingList?,
+    sharing: PantrySharing?,
     onChange: (Settings) -> Unit,
     onLinkShopping: () -> Unit,
     onUnlinkShopping: () -> Unit,
+    onSharePantry: () -> Unit,
+    onStopSharing: () -> Unit,
+    onSyncNow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -265,7 +274,27 @@ fun SettingsDialog(
         title = { Text(strings.settings) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(strings.shoppingList, style = MaterialTheme.typography.labelLarge)
+                Text(strings.sharedPantry, style = MaterialTheme.typography.labelLarge)
+                if (sharing == null) {
+                    Text(strings.notShared, style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = onSharePantry) { Text(strings.sharePantry) }
+                } else {
+                    Text(strings.sharedAs(sharing.link.fileName.orEmpty()), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        describe(sharing.sync, strings),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (sharing.sync is SyncState.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(strings.addressForOthers, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    SelectionContainer {
+                        Text(ShareLinks.shareable(sharing.link), style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                    }
+                    FlowRow {
+                        TextButton(onClick = onSyncNow) { Text(strings.syncNow) }
+                        TextButton(onClick = onStopSharing) { Text(strings.stopSharing, color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+                Text(strings.shoppingList, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 if (shopping == null) {
                     Text(strings.noShoppingList, style = MaterialTheme.typography.bodyMedium)
                     TextButton(onClick = onLinkShopping) { Text(strings.linkShoppingList) }

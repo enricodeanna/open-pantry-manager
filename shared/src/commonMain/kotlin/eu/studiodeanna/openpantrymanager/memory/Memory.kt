@@ -7,12 +7,15 @@ import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
 
 /**
- * What the app has learned from the user, kept on this device: where each food usually goes, where it
- * is usually moved to from each space, how long it usually keeps, which sublist of the shopping list
- * it goes on, and what the lines of shop receipts mean.
+ * What the app has learned from the user: where each food usually goes, where it is usually moved to
+ * from each space, how long it usually keeps, what it is called on the shopping list and in which
+ * sublist, and what the lines of shop receipts mean. A shared pantry shares it too.
  *
  * Habits are weights that grow by one each time and fade a little whenever something else happens to
  * the same food, so a new habit takes over after being repeated a few times.
+ *
+ * [stamps] say when each learned thing last changed, and on which device, so that two copies can be
+ * merged (see MemorySync.kt).
  */
 @Serializable
 data class Memory(
@@ -26,7 +29,13 @@ data class Memory(
     val packs: Map<String, Int> = emptyMap(),
     /** Receipt lines the user left out: not food, or not for the pantry (a bag, a deposit). */
     val skipped: Set<String> = emptySet(),
+    /** By learned thing (see [entries]): its last change. Things learned before stamping have none. */
+    val stamps: Map<String, Stamp> = emptyMap(),
 )
+
+/** When something changed, and on which device. */
+@Serializable
+data class Stamp(val at: Long, val by: String)
 
 @Serializable
 data class Food(
@@ -43,6 +52,8 @@ data class Food(
     val keepsDays: Int? = null,
     /** The name of the shopping-list sublist it went on last time; "" for the list's top, outside sublists. */
     val sublist: String? = null,
+    /** What it is called on the shopping list, when the user named it otherwise there ("Latte" for "Latte p.s."). */
+    val shoppingName: String? = null,
 )
 
 /** How quickly an old habit fades each time the same food is handled differently. */
@@ -123,8 +134,12 @@ fun Memory.complete(text: String, limit: Int = 6): List<Food> {
         .map { it.second }
 }
 
-/** Remembers the sublist [name] was put on in the shopping list; "" for none. */
-fun Memory.wentOnSublist(name: String, sublist: String): Memory = withFood(name) { it.copy(sublist = sublist) }
+/**
+ * Remembers that [name] went on the shopping list as [listName], in the sublist [sublist] ("" for none).
+ */
+fun Memory.wentOnList(name: String, listName: String, sublist: String): Memory = withFood(name) { food ->
+    food.copy(sublist = sublist, shoppingName = listName.trim().takeIf { nameKey(it) != nameKey(name) })
+}
 
 /**
  * Learns that the receipt line [line] (as [receiptKey] gives it) is the food [name], [pack] items of

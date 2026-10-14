@@ -50,8 +50,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Pick up what was ticked or added in Open Check Lists meanwhile.
-        app.repository.syncShopping()
+        // Pick up what was ticked or added in Open Check Lists meanwhile, and the shared pantry's changes.
+        app.repository.syncNow()
     }
 
     private companion object {

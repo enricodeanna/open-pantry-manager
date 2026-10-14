@@ -29,3 +29,19 @@ fun matchesName(name: String, query: String): Boolean {
     val key = nameKey(name)
     return key.startsWith(q) || key.split(' ').any { it.startsWith(q) } || (q.length >= 3 && q in key)
 }
+
+/** How many letters must be added, removed or changed to turn [a] into [b]. */
+fun editDistance(a: String, b: String): Int {
+    var previous = IntArray(b.length + 1) { it }
+    var current = IntArray(b.length + 1)
+    for (i in 1..a.length) {
+        current[0] = i
+        for (j in 1..b.length) {
+            current[j] = minOf(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+        }
+        val swap = previous
+        previous = current
+        current = swap
+    }
+    return previous[b.length]
+}

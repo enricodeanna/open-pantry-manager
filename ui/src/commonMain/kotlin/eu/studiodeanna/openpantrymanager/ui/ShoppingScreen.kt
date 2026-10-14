@@ -74,7 +74,7 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
     val linked = list != null
     LaunchedEffect(linked) {
         while (linked) {
-            repository.syncShopping()
+            repository.syncNow()
             delay(POLL_MILLIS)
         }
     }
@@ -102,7 +102,7 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
                 },
                 actions = {
                     if (list != null) {
-                        IconButton(onClick = { repository.syncShopping() }) { Icon(AppIcons.Sync, contentDescription = strings.syncNow) }
+                        IconButton(onClick = { repository.syncNow() }) { Icon(AppIcons.Sync, contentDescription = strings.syncNow) }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(AppIcons.MoreVert, contentDescription = strings.more) }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -162,7 +162,7 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(onClick = { repository.syncShopping() }) {
+                            TextButton(onClick = { repository.syncNow() }) {
                                 Text(strings.retry, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.SemiBold)
                             }
                         }
@@ -224,12 +224,17 @@ fun ShoppingScreen(repository: PantryRepository, onBack: () -> Unit) {
             name = "",
             shopping = list,
             suggested = null,
+            similar = repository::similarOnList,
             askName = true,
             onDismiss = { dialog = null },
             onLink = { dialog = ShoppingDialog.Link },
             onAdd = { name, sublist ->
                 dialog = null
                 repository.addToShopping(name, sublist)
+            },
+            onUse = { item ->
+                dialog = null
+                repository.useShoppingItem(item.text, item.id)
             },
         )
         ShoppingDialog.Unlink -> ConfirmDialog(
