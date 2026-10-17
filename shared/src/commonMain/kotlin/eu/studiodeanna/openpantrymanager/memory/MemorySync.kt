@@ -147,7 +147,9 @@ private fun combine(a: Food, b: Food): Food {
         count = a.count + b.count,
         places = a.places.sumWith(b.places),
         moves = (a.moves.keys + b.moves.keys).associateWith { a.moves[it].orEmpty().sumWith(b.moves[it].orEmpty()) },
-        keepsDays = listOfNotNull(a.keepsDays, b.keepsDays).takeIf { it.isNotEmpty() }?.average()?.toInt(),
+        keeps = (older.keeps + newer.keeps).takeLast(KEEPS_COMBINED),
+        keepsDays = typicalKeep((older.keeps + newer.keeps).takeLast(KEEPS_COMBINED))
+            ?: listOfNotNull(a.keepsDays, b.keepsDays).takeIf { it.isNotEmpty() }?.average()?.toInt(),
         sublist = newer.sublist ?: older.sublist,
         shoppingName = newer.shoppingName ?: older.shoppingName,
     )
@@ -156,3 +158,6 @@ private fun combine(a: Food, b: Food): Food {
 /** Weights by key added up. */
 private fun Map<String, Double>.sumWith(other: Map<String, Double>): Map<String, Double> =
     (keys + other.keys).associateWith { (this[it] ?: 0.0) + (other[it] ?: 0.0) }
+
+/** Keeping times kept when two phones' are combined, as many as one phone keeps. */
+private const val KEEPS_COMBINED = 5

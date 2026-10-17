@@ -62,7 +62,7 @@ class PantryEditorTest {
         assert(undone.latestStamp() > moved.latestStamp())
 
         // Once another device has changed the water left in the cabinet, only the bottles moved go back.
-        val elsewhere = PantryEditor("other") { 50 }.editItem(moved, water, "Water", 3, null)
+        val elsewhere = PantryEditor("other") { 50 }.editItem(moved, water, "Water", 3, null, null)
         val partly = editor.revert(elsewhere, change)
         assertEquals(mapOf(cabinet to 3), partly.named("Water").associate { it.space to it.quantity })
     }
@@ -78,12 +78,24 @@ class PantryEditorTest {
     }
 
     @Test
-    fun itemsAreListedByNameOrBySoonestExpiry() {
+    fun itemsAreListedBySoonestExpiryThenByName() {
         val (doc, cabinet, _) = pantry()
         var d = editor.addItem(doc, "beans", cabinet, 1, LocalDate(2027, 1, 1)).first
         d = editor.addItem(d, "Apples", cabinet).first
         d = editor.addItem(d, "Cheese", cabinet, 1, LocalDate(2026, 10, 20)).first
-        assertEquals(listOf("Apples", "beans", "Cheese"), d.itemsBySpace(ItemOrder.Name)[cabinet]?.map { it.name })
-        assertEquals(listOf("Cheese", "beans", "Apples"), d.itemsBySpace(ItemOrder.Expiry)[cabinet]?.map { it.name })
+        d = editor.addItem(d, "Butter", cabinet, 1, LocalDate(2026, 10, 20)).first
+        assertEquals(listOf("Butter", "Cheese", "beans", "Apples"), d.itemsBySpace()[cabinet]?.map { it.name })
+    }
+
+    @Test
+    fun foodCountedTogetherKeepsTheDayTheFirstWasBought() {
+        val (doc, cabinet, fridge) = pantry()
+        val expires = LocalDate(2026, 11, 1)
+        var (d, milk) = editor.addItem(doc, "Milk", cabinet, 1, expires, LocalDate(2026, 10, 10))
+        d = editor.addItem(d, "Milk", cabinet, 1, expires, LocalDate(2026, 10, 8)).first
+        assertEquals(2 to LocalDate(2026, 10, 8), d.item(milk)!!.let { it.quantity to it.bought })
+        // Moved, part of it keeps it too.
+        d = editor.moveItem(d, milk, fridge, 1)
+        assertEquals(listOf(LocalDate(2026, 10, 8), LocalDate(2026, 10, 8)), d.liveItems().map { it.bought })
     }
 }

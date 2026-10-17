@@ -45,8 +45,6 @@ interface Strings {
     val settings: String
     val addSpace: String
     val newSpace: String
-    val sortByExpiry: String
-    val sortByName: String
     val expandAll: String
     val collapseAll: String
     val addFood: String
@@ -89,6 +87,9 @@ interface Strings {
     fun usuallyIn(space: String): String
     val howMany: String
     val expires: String
+    val bought: String
+    val today: String
+    val anotherDay: String
     val noDate: String
     val pickDate: String
     fun usuallyKeeps(date: String): String
@@ -244,8 +245,6 @@ object EnglishStrings : Strings {
     override val settings = "Settings"
     override val addSpace = "Add space"
     override val newSpace = "New space"
-    override val sortByExpiry = "Sort by expiry date"
-    override val sortByName = "Sort by name"
     override val expandAll = "Expand all"
     override val collapseAll = "Collapse all"
     override val addFood = "Add food"
@@ -287,6 +286,9 @@ object EnglishStrings : Strings {
     override fun usuallyIn(space: String) = "Usually in $space"
     override val howMany = "How many"
     override val expires = "Expires"
+    override val bought = "Bought"
+    override val today = "Today"
+    override val anotherDay = "Another day"
     override val noDate = "No date"
     override val pickDate = "Pick a date"
     override fun usuallyKeeps(date: String) = "As usual: $date"
@@ -452,8 +454,6 @@ object ItalianStrings : Strings {
     override val settings = "Impostazioni"
     override val addSpace = "Aggiungi spazio"
     override val newSpace = "Nuovo spazio"
-    override val sortByExpiry = "Ordina per scadenza"
-    override val sortByName = "Ordina per nome"
     override val expandAll = "Espandi tutto"
     override val collapseAll = "Comprimi tutto"
     override val addFood = "Aggiungi alimento"
@@ -495,6 +495,9 @@ object ItalianStrings : Strings {
     override fun usuallyIn(space: String) = "Di solito in $space"
     override val howMany = "Quanti"
     override val expires = "Scadenza"
+    override val bought = "Acquistato"
+    override val today = "Oggi"
+    override val anotherDay = "Un altro giorno"
     override val noDate = "Nessuna"
     override val pickDate = "Scegli una data"
     override fun usuallyKeeps(date: String) = "Come al solito: $date"

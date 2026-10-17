@@ -1,6 +1,8 @@
 package eu.studiodeanna.openpantrymanager.memory
 
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
+import kotlinx.datetime.DatePeriod
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -62,6 +64,29 @@ class MemoryTest {
         assertEquals(10, memory.food("yogurt")?.keepsDays)
         memory = memory.placed("Yogurt", "fridge", 0, today, LocalDate(2026, 10, 28))
         assertEquals(12, memory.food("yogurt")?.keepsDays)
+    }
+
+    @Test
+    fun aFoodKeepsTheMiddleOfItsLastFiveTimesCountedFromTheDayItWasBought() {
+        var memory = Memory()
+        val bought = LocalDate(2026, 10, 1)
+        // A slip of the finger (30 days) does not pull the middle away.
+        for (days in listOf(7, 8, 30, 7, 9)) {
+            memory = memory.placed("Latte", "fridge", 0, today, bought.plus(DatePeriod(days = days)), bought)
+        }
+        assertEquals(8, memory.food("latte")?.keepsDays)
+        // Only the last five count: a new brand that keeps longer takes over.
+        repeat(3) { memory = memory.placed("Latte", "fridge", 0, today, bought.plus(DatePeriod(days = 12)), bought) }
+        assertEquals(listOf(7, 9, 12, 12, 12), memory.food("latte")?.keeps)
+        assertEquals(12, memory.food("latte")?.keepsDays)
+    }
+
+    @Test
+    fun aKeepingTimeLearnedBeforeCountsAsOneTime() {
+        val before = Memory(foods = mapOf("latte" to Food("Latte", keepsDays = 12)))
+        val after = before.placed("Latte", "fridge", 0, today, today.plus(DatePeriod(days = 8)))
+        assertEquals(listOf(12, 8), after.food("latte")?.keeps)
+        assertEquals(10, after.food("latte")?.keepsDays)
     }
 
     @Test

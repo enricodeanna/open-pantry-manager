@@ -159,14 +159,21 @@ fun QuantityStepper(value: Int, onChange: (Int) -> Unit, max: Int = 999) {
 
 /**
  * The expiry day of some food: none, a day picked in a calendar, or, for food whose keeping time
- * the app has learned ([keepsDays]), that many days from [today] in one tap. [compact] leaves out
- * the heading and the "no date" chip, for lists of many items; there a set date has a clear button.
+ * the app has learned ([keepsDays]), that many days from the day it was bought ([from]) in one tap.
+ * [compact] leaves out the heading and the "no date" chip, for lists of many items; there a set date
+ * has a clear button.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExpiryField(value: LocalDate?, today: LocalDate, keepsDays: Int?, compact: Boolean = false, onChange: (LocalDate?) -> Unit) {
+fun ExpiryField(
+    value: LocalDate?,
+    today: LocalDate,
+    keepsDays: Int?,
+    from: LocalDate = today,
+    compact: Boolean = false,
+    onChange: (LocalDate?) -> Unit,
+) {
     var picking by remember { mutableStateOf(false) }
-    val learned = keepsDays?.let { today.plus(DatePeriod(days = it)) }
+    val learned = keepsDays?.let { from.plus(DatePeriod(days = it)) }
     val chips = @Composable {
         if (!compact) FilterChip(selected = value == null, onClick = { onChange(null) }, label = { Text(strings.noDate) })
         if (learned != null && learned != value) {
@@ -200,20 +207,56 @@ fun ExpiryField(value: LocalDate?, today: LocalDate, keepsDays: Int?, compact: B
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { chips() }
         }
     }
-    if (picking) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = (value ?: learned ?: today).toPickerMillis())
-        DatePickerDialog(
-            onDismissRequest = { picking = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    picking = false
-                    state.selectedDateMillis?.let { onChange(pickerMillisToDate(it)) }
-                }) { Text(strings.ok) }
-            },
-            dismissButton = { TextButton(onClick = { picking = false }) { Text(strings.cancel) } },
-        ) {
-            DatePicker(state = state, showModeToggle = true)
+    if (picking) PickDateDialog(value ?: learned ?: today, onDismiss = { picking = false }) { onChange(it) }
+}
+
+/**
+ * The day some food was bought: today unless the user says otherwise, another day picked in a
+ * calendar, or not known.
+ */
+@Composable
+fun BoughtField(value: LocalDate?, today: LocalDate, onChange: (LocalDate?) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(strings.bought, style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = value == null, onClick = { onChange(null) }, label = { Text(strings.noDate) })
+            FilterChip(selected = value == today, onClick = { onChange(today) }, label = { Text(strings.today) })
+            if (value != null && value != today) {
+                InputChip(
+                    selected = true,
+                    onClick = { picking = true },
+                    label = { Text(strings.shortDate(value, today)) },
+                    leadingIcon = { Icon(AppIcons.Event, contentDescription = null, Modifier.size(18.dp)) },
+                )
+            } else {
+                AssistChip(
+                    onClick = { picking = true },
+                    label = { Text(strings.anotherDay) },
+                    leadingIcon = { Icon(AppIcons.Event, contentDescription = null, Modifier.size(18.dp)) },
+                )
+            }
         }
+    }
+    if (picking) PickDateDialog(value ?: today, onDismiss = { picking = false }) { onChange(it) }
+}
+
+/** A calendar to pick a day in, starting on [initial]. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickDateDialog(initial: LocalDate, onDismiss: () -> Unit, onPick: (LocalDate) -> Unit) {
+    val state = rememberDatePickerState(initialSelectedDateMillis = initial.toPickerMillis())
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                state.selectedDateMillis?.let { onPick(pickerMillisToDate(it)) }
+            }) { Text(strings.ok) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
+    ) {
+        DatePicker(state = state, showModeToggle = true)
     }
 }
 

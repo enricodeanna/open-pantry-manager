@@ -36,7 +36,8 @@ data class SharedPantry(
 
     companion object {
         const val KIND = "open-pantry-manager"
-        const val FORMAT = 1
+        /** 2: items have the day they were bought. An older app refuses the file rather than dropping it. */
+        const val FORMAT = 2
         const val EXTENSION = ".pantry"
     }
 }

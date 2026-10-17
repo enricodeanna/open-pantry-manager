@@ -16,6 +16,7 @@ object PantryCodec {
     fun decode(text: String): PantryDocument {
         val doc = json.decodeFromString(PantryDocument.serializer(), text)
         require(doc.format <= PantryDocument.FORMAT) { "Pantry saved by a newer version of the app" }
-        return doc
+        // Saved again in this version's format, which an older version then refuses rather than damages.
+        return doc.copy(format = PantryDocument.FORMAT)
     }
 }

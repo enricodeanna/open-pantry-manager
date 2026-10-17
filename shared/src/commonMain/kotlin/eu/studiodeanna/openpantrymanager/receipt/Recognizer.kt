@@ -37,7 +37,8 @@ data class ReceiptEntry(
 object Recognizer {
     /**
      * Understands the [lines] of a receipt with what [memory] holds. [spaces] are the live space ids;
-     * [today] is the shopping day. The same line printed twice becomes one entry with both counted.
+     * [today] is the shopping day, from which expiry days are reckoned. The same line printed twice
+     * becomes one entry with both counted.
      */
     fun recognize(lines: List<ReceiptLine>, memory: Memory, spaces: Set<String>, today: LocalDate): List<ReceiptEntry> {
         val merged = LinkedHashMap<String, ReceiptLine>()

@@ -34,8 +34,10 @@ build serves Google Play and F-Droid.
 ## How it works
 
 **Spaces and food.** The pantry shows each space as a section that folds, as Open Check Lists shows
-sections. Food has a name, a quantity, and optionally an expiry day; the same food with the same day in
-the same space is counted rather than listed twice. Ticking food means one of it was used: the count
+sections. Food has a name, a quantity, and optionally an expiry day and the day it was bought (today,
+unless you say otherwise, or not known); the same food with the same expiry day in the same space is
+counted rather than listed twice, keeping the earlier day of purchase. Each space lists its food by
+expiry day, the soonest first, food without a day last. Ticking food means one of it was used: the count
 goes down, and the last one takes it out of the pantry. Food expiring within three days, or already
 expired, is listed under **Use soon** at the top.
 
@@ -55,7 +57,11 @@ with the pantry when it is shared:
   goes in (marked ★) until you pick another;
 - where each food goes when moved from a given space. The move dialog starts on that space; for a food
   never moved from there, on where anything moved from there went;
-- how long a food keeps, from the expiry days you set, offered as a one-tap date ("As usual: 21 Oct");
+- how long a food keeps: the days from purchase to expiry, the last five times it was put away with an
+  expiry day; the middle one of them (the mean of the middle two) is offered as a one-tap date counted
+  from the day of purchase ("As usual: 21 Oct"), so that one odd date does not pull it away. A receipt
+  has one day of purchase for all its food; changing it moves the dates the app suggested, not those
+  set by hand;
 - what each food is called on the shopping list ("Latte" for "Latte p.s. Friuli"), and in which sublist;
 - what the lines of receipts mean, and which lines to leave out (bags, deposits), and how many items
   one line is (a pack of 6 bottles). Lines are compared by their letters, so a line read once with a
@@ -114,6 +120,9 @@ no change is overwritten unseen. Two phones learning about the same food within 
 keep one of the two lessons. An undo takes back only what its change did, not what other phones did
 meanwhile. Linking or unlinking the shopping list on one phone does so on all of them. Theme, language,
 order and folded spaces stay each phone's own.
+
+From format 2 (version 0.4.0) items carry the day they were bought: a phone with an older version refuses
+the file, asking to be updated, rather than dropping those days.
 
 The file ends in `.pantry`, not `.json`, and is marked as a pantry inside: Open Check Lists takes every
 `.json` file in a shared folder for a list, and an empty pantry reads as an empty list there. Each app

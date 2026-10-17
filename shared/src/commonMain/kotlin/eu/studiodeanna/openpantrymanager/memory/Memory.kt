@@ -48,8 +48,10 @@ data class Food(
     val places: Map<String, Double> = emptyMap(),
     /** From space id → (to space id → weight). */
     val moves: Map<String, Map<String, Double>> = emptyMap(),
-    /** Days it usually keeps from the day it is bought to its expiry day. */
+    /** Days it usually keeps, from the day it is bought to its expiry day: the middle one of [keeps]. */
     val keepsDays: Int? = null,
+    /** How many days it kept the last times it was put in the pantry with an expiry day, newest last. */
+    val keeps: List<Int> = emptyList(),
     /** The name of the shopping-list sublist it went on last time; "" for the list's top, outside sublists. */
     val sublist: String? = null,
     /** What it is called on the shopping list, when the user named it otherwise there ("Latte" for "Latte p.s."). */
@@ -76,22 +78,41 @@ private fun Memory.withFood(name: String, change: (Food) -> Food): Memory {
 
 /**
  * Remembers that [name] was put in [space]. With an [expires] day, it also learns how long that food
- * keeps from [today].
+ * keeps from the day it was [bought] (or [today]).
  */
-fun Memory.placed(name: String, space: String, now: Long, today: LocalDate, expires: LocalDate? = null): Memory =
-    withFood(name) { food ->
-        val days = expires?.let { today.daysUntil(it) }?.takeIf { it in 0..MAX_KEEP_DAYS }
-        food.copy(
-            count = food.count + 1,
-            last = now,
-            places = food.places.reinforced(space),
-            keepsDays = when {
-                days == null -> food.keepsDays
-                food.keepsDays == null -> days
-                else -> ((food.keepsDays + days) / 2.0).roundToInt()
-            },
-        )
-    }
+fun Memory.placed(
+    name: String,
+    space: String,
+    now: Long,
+    today: LocalDate,
+    expires: LocalDate? = null,
+    bought: LocalDate? = null,
+): Memory = withFood(name) { food ->
+    val days = expires?.let { (bought ?: today).daysUntil(it) }?.takeIf { it in 0..MAX_KEEP_DAYS }
+    // What was learned before keeping times were listed counts as one time.
+    val keeps = if (days == null) food.keeps else (food.keeps.ifEmpty { listOfNotNull(food.keepsDays) } + days).takeLast(KEEPS_COUNTED)
+    food.copy(
+        count = food.count + 1,
+        last = now,
+        places = food.places.reinforced(space),
+        keeps = keeps,
+        keepsDays = typicalKeep(keeps) ?: food.keepsDays,
+    )
+}
+
+/**
+ * The keeping time to suggest from the last ones ([keeps]): the middle one (the mean of the middle two),
+ * so that one odd date, a typing slip say, does not pull it away.
+ */
+internal fun typicalKeep(keeps: List<Int>): Int? {
+    if (keeps.isEmpty()) return null
+    val sorted = keeps.sorted()
+    val middle = sorted.size / 2
+    return if (sorted.size % 2 == 1) sorted[middle] else ((sorted[middle - 1] + sorted[middle]) / 2.0).roundToInt()
+}
+
+/** How many of the latest keeping times count: enough to steady it, few enough to follow a new brand. */
+private const val KEEPS_COUNTED = 5
 
 /** Remembers that [name] was moved from one space to another. */
 fun Memory.moved(name: String, from: String, to: String): Memory =

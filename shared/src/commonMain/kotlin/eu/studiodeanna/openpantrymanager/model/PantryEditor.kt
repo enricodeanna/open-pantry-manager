@@ -59,20 +59,23 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
         space: String,
         quantity: Int = 1,
         expires: LocalDate? = null,
+        bought: LocalDate? = null,
     ): Pair<PantryDocument, String> {
         val at = doc.stamp()
         val same = doc.sameFood(name, space, expires)
         if (same != null) {
-            return doc.withItem(same.copy(quantity = same.quantity + quantity, at = at, by = device)) to same.id
+            val counted = same.copy(quantity = same.quantity + quantity, bought = earlier(same.bought, bought), at = at, by = device)
+            return doc.withItem(counted) to same.id
         }
-        val item = PantryItem(newId(), name.trim(), space, quantity.coerceAtLeast(1), expires, added = now(), at = at, by = device)
+        val item = PantryItem(newId(), name.trim(), space, quantity.coerceAtLeast(1), expires, bought, added = now(), at = at, by = device)
         return doc.copy(items = doc.items + item) to item.id
     }
 
-    /** Changes an item's name, quantity and expiry day; where it is changes with [moveItem]. */
-    fun editItem(doc: PantryDocument, id: String, name: String, quantity: Int, expires: LocalDate?): PantryDocument {
+    /** Changes an item's name, quantity, expiry day and day it was bought; where it is changes with [moveItem]. */
+    fun editItem(doc: PantryDocument, id: String, name: String, quantity: Int, expires: LocalDate?, bought: LocalDate?): PantryDocument {
         val item = doc.item(id) ?: return doc
-        return doc.withItem(item.copy(name = name.trim(), quantity = quantity.coerceAtLeast(1), expires = expires, at = doc.stamp(), by = device))
+        val edited = item.copy(name = name.trim(), quantity = quantity.coerceAtLeast(1), expires = expires, bought = bought, at = doc.stamp(), by = device)
+        return doc.withItem(edited)
     }
 
     /**
@@ -94,7 +97,7 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
             doc.withItem(item.copy(quantity = item.quantity - moving, at = at, by = device))
         }
         result = if (target != null) {
-            result.withItem(target.copy(quantity = target.quantity + moving, at = at, by = device))
+            result.withItem(target.copy(quantity = target.quantity + moving, bought = earlier(target.bought, item.bought), at = at, by = device))
         } else {
             result.copy(items = result.items + item.copy(id = newId(), space = space, quantity = moving, at = at, by = device))
         }
@@ -134,6 +137,9 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
             },
         )
     }
+
+    /** Of two days an item was bought, the earlier: food counted together keeps its oldest. */
+    private fun earlier(a: LocalDate?, b: LocalDate?): LocalDate? = listOfNotNull(a, b).minOrNull()
 
     private fun PantryDocument.sameFood(name: String, space: String, expires: LocalDate?): PantryItem? =
         liveItems().firstOrNull { it.space == space && it.expires == expires && nameKey(it.name) == nameKey(name) }

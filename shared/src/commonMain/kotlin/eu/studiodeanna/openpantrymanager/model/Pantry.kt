@@ -15,7 +15,8 @@ data class PantryDocument(
     val items: List<PantryItem> = emptyList(),
 ) {
     companion object {
-        const val FORMAT = 1
+        /** 2: items have the day they were bought. An older app refuses the file rather than dropping it. */
+        const val FORMAT = 2
     }
 }
 
@@ -40,6 +41,8 @@ data class PantryItem(
     val space: String,
     val quantity: Int = 1,
     val expires: LocalDate? = null,
+    /** The day it was bought, if known; the day it was put in the pantry, unless the user said otherwise. */
+    val bought: LocalDate? = null,
     val added: Long,
     override val at: Long,
     override val by: String,
@@ -59,23 +62,15 @@ fun PantryDocument.item(id: String): PantryItem? = items.firstOrNull { it.id == 
 
 fun PantryDocument.space(id: String?): Space? = spaces.firstOrNull { it.id == id && !it.deleted }
 
-/** How the items of a space are listed. */
-@Serializable
-enum class ItemOrder { Name, Expiry }
-
 /**
- * Live items by space, each space's in [order]. The null key holds items whose space is gone, which
- * happens when a space is deleted on one device while food is put in it on another.
+ * Live items by space, each space's by expiry day: the soonest first, items without a day last, and
+ * by name where the day is the same. The null key holds items whose space is gone, which happens when
+ * a space is deleted on one device while food is put in it on another.
  */
-fun PantryDocument.itemsBySpace(order: ItemOrder = ItemOrder.Name): Map<String?, List<PantryItem>> {
+fun PantryDocument.itemsBySpace(): Map<String?, List<PantryItem>> {
     val live = visibleSpaces().mapTo(HashSet()) { it.id }
-    val byName = compareBy<PantryItem>({ nameKey(it.name) }, { it.expires }, { it.id })
-    val comparator = when (order) {
-        ItemOrder.Name -> byName
-        // Items without a date go last; among the rest, the soonest first.
-        ItemOrder.Expiry -> compareBy<PantryItem>({ it.expires == null }, { it.expires }).then(byName)
-    }
-    return liveItems().sortedWith(comparator).groupBy { if (it.space in live) it.space else null }
+    val order = compareBy<PantryItem>({ it.expires == null }, { it.expires }, { nameKey(it.name) }, { it.id })
+    return liveItems().sortedWith(order).groupBy { if (it.space in live) it.space else null }
 }
 
 fun PantryDocument.merge(other: PantryDocument): PantryDocument = PantryDocument(

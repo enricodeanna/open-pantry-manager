@@ -49,7 +49,7 @@ fun AddFoodDialog(
     spaces: List<Space>,
     initialSpace: String? = null,
     onDismiss: () -> Unit,
-    onAdd: (name: String, space: String, quantity: Int, expires: LocalDate?) -> Unit,
+    onAdd: (name: String, space: String, quantity: Int, expires: LocalDate?, bought: LocalDate?) -> Unit,
 ) {
     var field by remember { mutableStateOf(TextFieldValue("")) }
     val name = field.text
@@ -58,6 +58,7 @@ fun AddFoodDialog(
     var quantity by remember { mutableStateOf(1) }
     var expires by remember { mutableStateOf<LocalDate?>(null) }
     val today = repository.today()
+    var bought by remember { mutableStateOf<LocalDate?>(today) }
     val usual = remember(name) { repository.placeFor(name) }
     val food = remember(name) { repository.food(name) }
     val suggestions = remember(name) { repository.complete(name).filterNot { nameKey(it.name) == nameKey(name) }.take(4) }
@@ -66,7 +67,7 @@ fun AddFoodDialog(
     val chosen = space?.takeIf { id -> spaces.any { it.id == id } }
     val ok = name.isNotBlank() && chosen != null
     fun add() {
-        if (ok) onAdd(name.trim(), chosen, quantity, expires)
+        if (ok) onAdd(name.trim(), chosen, quantity, expires, bought)
     }
 
     AlertDialog(
@@ -117,7 +118,8 @@ fun AddFoodDialog(
                     Text(strings.howMany, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                     QuantityStepper(quantity, { quantity = it })
                 }
-                ExpiryField(expires, today, food?.keepsDays) { expires = it }
+                BoughtField(bought, today) { bought = it }
+                ExpiryField(expires, today, food?.keepsDays, from = bought ?: today) { expires = it }
             }
             LaunchedEffect(Unit) { focus.requestFocus() }
         },
@@ -134,7 +136,7 @@ fun ItemDialog(
     today: LocalDate,
     keepsDays: Int?,
     onDismiss: () -> Unit,
-    onSave: (name: String, quantity: Int, expires: LocalDate?, space: String) -> Unit,
+    onSave: (name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate?) -> Unit,
     onFinished: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -142,6 +144,7 @@ fun ItemDialog(
     var quantity by remember { mutableStateOf(item.quantity) }
     var expires by remember { mutableStateOf(item.expires) }
     var space by remember { mutableStateOf(item.space) }
+    var bought by remember { mutableStateOf(item.bought) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.editFood) },
@@ -161,7 +164,8 @@ fun ItemDialog(
                     Text(strings.howMany, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                     QuantityStepper(quantity, { quantity = it })
                 }
-                ExpiryField(expires, today, keepsDays) { expires = it }
+                BoughtField(bought, today) { bought = it }
+                ExpiryField(expires, today, keepsDays, from = bought ?: today) { expires = it }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onFinished) { Text(strings.finished, fontWeight = FontWeight.SemiBold) }
                     TextButton(onClick = onDelete) { Text(strings.delete, color = MaterialTheme.colorScheme.error) }
@@ -169,7 +173,7 @@ fun ItemDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(name, quantity, expires, space) }, enabled = name.isNotBlank()) { Text(strings.save) }
+            TextButton(onClick = { onSave(name, quantity, expires, space, bought) }, enabled = name.isNotBlank()) { Text(strings.save) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )

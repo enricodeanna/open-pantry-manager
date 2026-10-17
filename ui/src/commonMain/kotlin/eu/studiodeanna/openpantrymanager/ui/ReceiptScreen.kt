@@ -59,6 +59,8 @@ private data class ReviewRow(
     val spacePicked: Boolean = false,
     /** The user has changed something here, so has seen it. */
     val reviewed: Boolean = false,
+    /** The user set the expiry day, which stays when the day of purchase changes. */
+    val expiryPicked: Boolean = false,
 ) {
     /** Still as the app guessed, for a line it did not know for sure, and not looked at yet. */
     val unsure get() = entry.recognition in setOf(Recognition.Unknown, Recognition.Probable) && entry.name == guessed && !reviewed
@@ -91,11 +93,25 @@ fun ReceiptScreen(
     var nextKey by remember { mutableStateOf(entries.size) }
     /** The row a new space is being named for. */
     var newSpaceFor by remember { mutableStateOf<Int?>(null) }
+    /** When it was all bought, which expiry days are reckoned from: today, unless the receipt is older. */
+    var bought by remember { mutableStateOf<LocalDate?>(today) }
+    val from = bought ?: today
     val needHelp = rows.count { it.entry.include && (it.unsure || it.entry.space == null) }
     val canSave = rows.all { it.ready } && rows.any { it.entry.include }
 
     fun update(index: Int, change: (ReviewRow) -> ReviewRow) {
         rows[index] = change(rows[index]).copy(reviewed = true)
+    }
+
+    /** A new day of purchase: the expiry days the app suggested move with it; those set by hand stay. */
+    fun changeBought(day: LocalDate?) {
+        bought = day
+        rows.forEachIndexed { index, row ->
+            val keeps = repository.food(row.entry.name)?.keepsDays
+            if (!row.expiryPicked && row.entry.expires != null && keeps != null) {
+                rows[index] = row.copy(entry = row.entry.copy(expires = (day ?: today).plus(DatePeriod(days = keeps))))
+            }
+        }
     }
 
     Scaffold(
@@ -108,7 +124,7 @@ fun ReceiptScreen(
                 actions = {
                     TextButton(
                         onClick = {
-                            val (step, count) = repository.saveReceipt(rows.map { it.entry })
+                            val (step, count) = repository.saveReceipt(rows.map { it.entry }, bought)
                             onSaved(count, step)
                         },
                         enabled = canSave,
@@ -131,11 +147,15 @@ fun ReceiptScreen(
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 }
+                item(key = "bought") {
+                    Box(Modifier.padding(bottom = 8.dp)) { BoughtField(bought, today, ::changeBought) }
+                }
                 itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
                     ReceiptRowCard(
                         row = row,
                         spaces = spaces,
                         today = today,
+                        from = from,
                         repository = repository,
                         onChange = { change -> update(index) { change(it) } },
                         onNewSpace = { newSpaceFor = row.key },
@@ -169,6 +189,8 @@ private fun ReceiptRowCard(
     row: ReviewRow,
     spaces: List<Space>,
     today: LocalDate,
+    /** The day it was bought, which expiry days are reckoned from. */
+    from: LocalDate,
     repository: PantryRepository,
     onChange: ((ReviewRow) -> ReviewRow) -> Unit,
     /** Names a space the pantry does not have yet, for this food to go in. */
@@ -244,7 +266,7 @@ private fun ReceiptRowCard(
                                 editing = false
                                 onChange {
                                     val space = if (it.spacePicked) it.entry.space else repository.placeFor(food.name) ?: it.entry.space
-                                    val keeps = food.keepsDays?.let { days -> today.plus(DatePeriod(days = days)) }
+                                    val keeps = food.keepsDays?.let { days -> from.plus(DatePeriod(days = days)) }
                                     it.copy(entry = it.entry.copy(name = food.name, space = space, expires = it.entry.expires ?: keeps))
                                 }
                             }.padding(vertical = 6.dp),
@@ -257,8 +279,8 @@ private fun ReceiptRowCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     QuantityStepper(entry.quantity, { q -> onChange { it.copy(entry = it.entry.copy(quantity = q)) } })
                     Box(Modifier.weight(1f).padding(start = 8.dp)) {
-                        ExpiryField(entry.expires, today, repository.food(entry.name)?.keepsDays, compact = true) { date ->
-                            onChange { it.copy(entry = it.entry.copy(expires = date)) }
+                        ExpiryField(entry.expires, today, repository.food(entry.name)?.keepsDays, from = from, compact = true) { date ->
+                            onChange { it.copy(entry = it.entry.copy(expires = date), expiryPicked = true) }
                         }
                     }
                 }

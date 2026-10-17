@@ -274,17 +274,20 @@ class PantryRepository(
 
     // Food
 
-    /** Puts food in a space and learns that it goes there. Returns what undoes it. */
-    fun addItem(name: String, space: String, quantity: Int = 1, expires: LocalDate? = null): UndoStep? =
-        edit(PantryAction.AddedFood(name.trim()), { editor.addItem(it, name, space, quantity, expires).first }) {
-            it.placed(name, space, now(), today(), expires)
+    /**
+     * Puts food in a space, bought on [bought] (today, unless said otherwise; null if not known), and
+     * learns that it goes there and, with an [expires] day, how long it keeps. Returns what undoes it.
+     */
+    fun addItem(name: String, space: String, quantity: Int = 1, expires: LocalDate? = null, bought: LocalDate? = today()): UndoStep? =
+        edit(PantryAction.AddedFood(name.trim()), { editor.addItem(it, name, space, quantity, expires, bought).first }) {
+            it.placed(name, space, now(), today(), expires, bought)
         }
 
     /** Changes an item; a new space counts as moving it there. */
-    fun editItem(id: String, name: String, quantity: Int, expires: LocalDate?, space: String): UndoStep? {
+    fun editItem(id: String, name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate? = null): UndoStep? {
         val item = _pantry.value.item(id) ?: return null
         return edit(PantryAction.EditedFood(name.trim()), { doc ->
-            val edited = editor.editItem(doc, id, name, quantity, expires)
+            val edited = editor.editItem(doc, id, name, quantity, expires, bought)
             if (space != item.space) editor.moveItem(edited, id, space) else edited
         }) { memory ->
             if (space != item.space) memory.moved(name, item.space, space) else memory
@@ -390,21 +393,21 @@ class PantryRepository(
 
     /**
      * Reads a receipt from the text found on its photos, taken top to bottom, and says what each product
-     * line probably is.
+     * line probably is, and until when it keeps if bought on [bought].
      */
-    fun understandReceipt(pages: List<List<OcrLine>>): List<ReceiptEntry> =
-        Recognizer.recognize(ReceiptParser.parsePages(pages), _memory.value, liveSpaces(), today())
+    fun understandReceipt(pages: List<List<OcrLine>>, bought: LocalDate = today()): List<ReceiptEntry> =
+        Recognizer.recognize(ReceiptParser.parsePages(pages), _memory.value, liveSpaces(), bought)
 
     /**
-     * Puts the included entries in the pantry, and learns what each line was: the food it is, where
-     * that goes, how long it keeps; and that lines left out are not for the pantry. Returns what undoes
-     * it, and how many items were put away.
+     * Puts the included entries in the pantry, bought on [bought], and learns what each line was: the
+     * food it is, where that goes, how long it keeps; and that lines left out are not for the pantry.
+     * Returns what undoes it, and how many items were put away.
      */
-    fun saveReceipt(entries: List<ReceiptEntry>): Pair<UndoStep?, Int> {
+    fun saveReceipt(entries: List<ReceiptEntry>, bought: LocalDate? = today()): Pair<UndoStep?, Int> {
         val spaces = liveSpaces()
         val kept = entries.filter { it.include && it.name.isNotBlank() && it.space in spaces }
         val step = edit(PantryAction.PutAway(kept.sumOf { it.quantity }), { doc ->
-            kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires).first }
+            kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought).first }
         }) { memory ->
             entries.fold(memory) { m, e ->
                 // Products the user added by hand have no receipt line to learn.
@@ -414,7 +417,7 @@ class PantryRepository(
                         // 6 items for 1 printed: a pack of 6, remembered for that line.
                         val pack = if (e.quantity % e.line.quantity == 0) e.quantity / e.line.quantity else 1
                         (if (printed) m.receiptMeans(e.line.text, e.name, pack) else m)
-                            .placed(e.name, e.space!!, now(), today(), e.expires)
+                            .placed(e.name, e.space!!, now(), today(), e.expires, bought)
                     }
                     !e.include && printed -> m.receiptSkips(e.line.text)
                     else -> m

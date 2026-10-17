@@ -168,11 +168,13 @@ class PantrySharingTest {
         assertEquals(Messages.current.notAPantry, e.message)
         assertEquals(groceries, listShare.content)
 
-        // A link to a pantry is refused as a shopping list, even an empty pantry that reads like an empty list.
-        val pantryShare = FakeNextcloud(token = "Pantry123").apply { overwrite(SharedPantryCodec.encode(SharedPantry())) }
+        // A link to a pantry is refused as a shopping list, even an empty pantry of format 1 (0.2.0 and 0.3.0),
+        // which reads like an empty list; from format 2, Open Check Lists itself refuses pantries as newer.
+        val pantryShare = FakeNextcloud(token = "Pantry123").apply { overwrite(SharedPantryCodec.encode(SharedPantry(format = 1))) }
         val before = pantryShare.content
         assertFailsWith<RemoteException> { phone(http = pantryShare.http).linkShoppingList(pantryShare.link) }
         assertEquals(before, pantryShare.content)
-        assertTrue(runCatching { ListCodec.decode(before!!) }.isSuccess, "an empty pantry does parse as a list")
+        assertTrue(runCatching { ListCodec.decode(before!!) }.isSuccess, "an empty pantry of format 1 does parse as a list")
+        assertTrue(runCatching { ListCodec.decode(SharedPantryCodec.encode(SharedPantry())) }.isFailure, "format 2 does not")
     }
 }

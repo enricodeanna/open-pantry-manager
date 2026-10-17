@@ -79,7 +79,6 @@ import androidx.compose.ui.unit.sp
 import eu.studiodeanna.openpantrymanager.PantryRepository
 import eu.studiodeanna.openpantrymanager.SyncState
 import eu.studiodeanna.openpantrymanager.UndoStep
-import eu.studiodeanna.openpantrymanager.model.ItemOrder
 import eu.studiodeanna.openpantrymanager.model.PantryItem
 import eu.studiodeanna.openpantrymanager.model.Space
 import eu.studiodeanna.openpantrymanager.model.itemsBySpace
@@ -131,7 +130,7 @@ fun PantryScreen(
     val texts = strings
 
     val spaces = remember(doc) { doc.visibleSpaces() }
-    val grouped = remember(doc, settings.order) { doc.itemsBySpace(settings.order) }
+    val grouped = remember(doc) { doc.itemsBySpace() }
 
     /** Says what was done, with Undo; a new message replaces the one showing. */
     fun announce(message: String, step: UndoStep?) {
@@ -241,11 +240,6 @@ fun PantryScreen(
                                 // In the menu, as in Open Check Lists, so that undo and redo fit beside the title.
                                 MenuItem(strings.search) { menu = false; query = "" }
                                 MenuItem(strings.addSpace) { menu = false; dialog = Dialog.AddSpace }
-                                MenuItem(if (settings.order == ItemOrder.Name) strings.sortByExpiry else strings.sortByName) {
-                                    menu = false
-                                    val order = if (settings.order == ItemOrder.Name) ItemOrder.Expiry else ItemOrder.Name
-                                    scope.launch { repository.updateSettings(settings.copy(order = order)) }
-                                }
                                 if (spaces.isNotEmpty()) {
                                     MenuItem(strings.expandAll, enabled = collapsed.isNotEmpty()) {
                                         menu = false
@@ -380,9 +374,9 @@ fun PantryScreen(
 
     when (val d = dialog) {
         null -> Unit
-        is Dialog.AddFood -> AddFoodDialog(repository, spaces, d.space, onDismiss = { dialog = null }) { name, space, quantity, expires ->
+        is Dialog.AddFood -> AddFoodDialog(repository, spaces, d.space, onDismiss = { dialog = null }) { name, space, quantity, expires, bought ->
             dialog = null
-            val step = repository.addItem(name, space, quantity, expires)
+            val step = repository.addItem(name, space, quantity, expires, bought)
             announce(texts.addedTo(name, spaces.firstOrNull { it.id == space }?.name.orEmpty()), step)
         }
         Dialog.AddSpace -> AddSpaceDialog(spaces.map { it.name }, onDismiss = { dialog = null }) {
@@ -408,9 +402,9 @@ fun PantryScreen(
             today = today,
             keepsDays = repository.food(d.item.name)?.keepsDays,
             onDismiss = { dialog = null },
-            onSave = { name, quantity, expires, space ->
+            onSave = { name, quantity, expires, space, bought ->
                 dialog = null
-                repository.editItem(d.item.id, name, quantity, expires, space)
+                repository.editItem(d.item.id, name, quantity, expires, space, bought)
             },
             onFinished = {
                 dialog = null
