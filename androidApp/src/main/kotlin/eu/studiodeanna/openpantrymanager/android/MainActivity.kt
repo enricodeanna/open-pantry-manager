@@ -20,15 +20,18 @@ class MainActivity : ComponentActivity() {
 
     // Made before the activity starts, as Android requires of what waits for other apps' results.
     private val scanner = PhotoReceiptScanner(this)
+    private val voice = VoskVoiceInput(this)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        // Test builds can be driven over adb: handed receipt photos to "take" instead of the camera's, and
-        // shown over the lock screen of a test phone.
-        // adb shell am start -n eu.studiodeanna.openpantrymanager/.android.MainActivity --es receiptImage <path>[,<path>…] --ez overLockScreen true
+        // Test builds can be driven over adb: handed receipt photos to "take" instead of the camera's and a
+        // recorded sentence to "hear" instead of the microphone's, and shown over the lock screen of a test phone.
+        // adb shell am start -n eu.studiodeanna.openpantrymanager/.android.MainActivity --es receiptImage <path>[,<path>…] \
+        //     --es voiceAudio <16 kHz mono WAV> --ez overLockScreen true
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             intent.getStringExtra("receiptImage")?.let { paths -> scanner.nextImages = ArrayDeque(paths.split(',').map(::File)) }
+            intent.getStringExtra("voiceAudio")?.let { voice.nextAudio = File(it) }
             if (intent.getBooleanExtra("overLockScreen", false) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
                 setTurnScreenOn(true)
@@ -44,7 +47,7 @@ class MainActivity : ComponentActivity() {
                     navigationBarStyle = SystemBarStyle.auto(LIGHT_SCRIM, DARK_SCRIM) { dark },
                 )
             }
-            PantryApp(app.repository, scanner)
+            PantryApp(app.repository, scanner, voice)
         }
     }
 

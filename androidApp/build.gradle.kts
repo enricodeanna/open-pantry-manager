@@ -15,8 +15,8 @@ android {
         applicationId = "eu.studiodeanna.openpantrymanager"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
     }
 
     buildTypes {
@@ -83,6 +83,10 @@ androidComponents {
 dependencies {
     implementation(project(":ui"))
     implementation(libs.androidx.activity.compose)
+    // Voice commands: Vosk hears them on the phone. JNA, which Vosk calls its native library with, comes
+    // as an Android library with its own native part, not as the plain jar.
+    implementation(libs.vosk.android)
+    implementation("${libs.jna.get()}@aar")
 }
 
 /** The kinds of processor an APK is built for, with the digit its version code ends in. */

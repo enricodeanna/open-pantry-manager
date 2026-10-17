@@ -105,10 +105,13 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
     }
 
     /** Takes one of an item; the last one leaves the pantry. */
-    fun useOne(doc: PantryDocument, id: String): PantryDocument {
+    fun useOne(doc: PantryDocument, id: String): PantryDocument = useSome(doc, id, 1)
+
+    /** Takes [count] of an item; when that is all of it, it leaves the pantry. */
+    fun useSome(doc: PantryDocument, id: String, count: Int): PantryDocument {
         val item = doc.item(id) ?: return doc
-        return if (item.quantity <= 1) removeItem(doc, id)
-        else doc.withItem(item.copy(quantity = item.quantity - 1, at = doc.stamp(), by = device))
+        return if (item.quantity <= count) removeItem(doc, id)
+        else doc.withItem(item.copy(quantity = item.quantity - count.coerceAtLeast(1), at = doc.stamp(), by = device))
     }
 
     /** Takes an item out of the pantry, all of it: finished, thrown away or added by mistake. */

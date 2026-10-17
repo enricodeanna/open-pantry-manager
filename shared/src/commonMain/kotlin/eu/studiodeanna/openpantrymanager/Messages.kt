@@ -27,6 +27,10 @@ interface Messages {
     val noCameraApp: String
     val photoUnreadable: String
 
+    val speechModelFailed: String
+    val microphoneNeeded: String
+    val speechFailed: String
+
     val notAPantry: String
     val newerPantry: String
     val choosePantry: String
@@ -64,6 +68,10 @@ object EnglishMessages : Messages {
     override val noCameraApp = "There is no camera app to take the photo with."
     override val photoUnreadable = "The text on the photo could not be read."
 
+    override val speechModelFailed = "The speech model could not be downloaded. Check the connection and try again."
+    override val microphoneNeeded = "Voice commands need the microphone."
+    override val speechFailed = "The speech recognizer could not start."
+
     override val notAPantry = "This file is not a pantry of Open Pantry Manager."
     override val newerPantry = "This pantry was saved by a newer version of Open Pantry Manager. Update the app to use it."
     override val choosePantry = "Choose which pantry to use."
@@ -98,6 +106,10 @@ object ItalianMessages : Messages {
 
     override val noCameraApp = "Non c'è un'app fotocamera con cui scattare la foto."
     override val photoUnreadable = "Non è stato possibile leggere il testo della foto."
+
+    override val speechModelFailed = "Non è stato possibile scaricare il modello vocale. Controlla la connessione e riprova."
+    override val microphoneNeeded = "I comandi vocali hanno bisogno del microfono."
+    override val speechFailed = "Non è stato possibile avviare il riconoscimento vocale."
 
     override val notAPantry = "Questo file non è una dispensa di Open Pantry Manager."
     override val newerPantry =

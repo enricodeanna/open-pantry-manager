@@ -70,6 +70,10 @@ import eu.studiodeanna.openpantrymanager.sync.nextcloudShareFor
 import eu.studiodeanna.openpantrymanager.sync.remoteFileFor
 import eu.studiodeanna.openpantrymanager.sync.syncDocument
 import eu.studiodeanna.openpantrymanager.sync.syncWith
+import eu.studiodeanna.openpantrymanager.voice.VoiceCommand
+import eu.studiodeanna.openpantrymanager.voice.VoiceLanguage
+import eu.studiodeanna.openpantrymanager.voice.understandVoice
+import eu.studiodeanna.openpantrymanager.voice.voiceVocabulary
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
@@ -310,6 +314,25 @@ class PantryRepository(
         val action = if (last) PantryAction.Finished(item.name) else PantryAction.UsedOne(item.name)
         return edit(action, { editor.useOne(it, id) }) to last
     }
+
+    /** Takes [count] of an item. Returns what undoes it, and whether that was all of it. */
+    fun useSome(id: String, count: Int): Pair<UndoStep?, Boolean>? {
+        val item = _pantry.value.item(id) ?: return null
+        val last = item.quantity <= count
+        val action = when {
+            last -> PantryAction.Finished(item.name)
+            count == 1 -> PantryAction.UsedOne(item.name)
+            else -> PantryAction.UsedSome(item.name, count)
+        }
+        return edit(action, { editor.useSome(it, id, count) }) to last
+    }
+
+    /** What was [heard] in [language] (in more ways than one, the likeliest first) asks to do; nothing is done yet. */
+    fun understand(heard: List<String>, language: VoiceLanguage): VoiceCommand =
+        understandVoice(heard, language, _pantry.value, _memory.value)
+
+    /** The words for the speech recognizer to listen for in [language]: of commands, and of the food here. */
+    fun voiceVocabulary(language: VoiceLanguage): List<String> = voiceVocabulary(language, _pantry.value, _memory.value)
 
     /**
      * Takes an item out of the pantry, all of it: it is [finished], or thrown away, or was added by

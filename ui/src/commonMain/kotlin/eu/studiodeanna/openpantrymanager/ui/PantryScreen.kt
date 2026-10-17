@@ -34,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -85,12 +86,15 @@ import eu.studiodeanna.openpantrymanager.model.itemsBySpace
 import eu.studiodeanna.openpantrymanager.model.liveItems
 import eu.studiodeanna.openpantrymanager.model.matchesName
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
+import eu.studiodeanna.openpantrymanager.voice.VoiceCommand
+import eu.studiodeanna.openpantrymanager.voice.VoiceLanguages
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
 
 private sealed interface Dialog {
-    data class AddFood(val space: String?) : Dialog
+    data class AddFood(val space: String?, val name: String = "", val quantity: Int = 1) : Dialog
+    data object Voice : Dialog
     data object AddSpace : Dialog
     data class RenameSpace(val space: Space) : Dialog
     data class DeleteSpace(val space: Space) : Dialog
@@ -114,6 +118,8 @@ fun PantryScreen(
     onShopping: () -> Unit,
     /** Opens the receipt photos; null where receipts cannot be read. */
     onScan: (() -> Unit)?,
+    /** Hears voice commands; null where the platform cannot. */
+    voice: VoiceInput? = null,
 ) {
     val doc by repository.pantry.collectAsState()
     val settings by repository.settings.collectAsState()
@@ -164,6 +170,56 @@ fun PantryScreen(
 
     fun finished(name: String) {
         if (settings.offerShopping) dialog = Dialog.Shopping(name)
+    }
+
+    // Voice commands are understood in the language the app speaks, when there are some for it.
+    val voiceLanguage = remember(texts) { VoiceLanguages.forCode(texts.languageCode) }
+
+    /** Does what a sentence heard says; false when it makes no sense, for the voice dialog to say so. */
+    fun obey(heard: List<String>): Boolean {
+        val language = voiceLanguage ?: return false
+        when (val command = repository.understand(heard, language)) {
+            is VoiceCommand.NotUnderstood -> return false
+            is VoiceCommand.Use -> {
+                dialog = null
+                val item = command.item
+                val (step, last) = repository.useSome(item.id, command.count) ?: return true
+                if (last) {
+                    announce(texts.finishedMessage(item.name), step)
+                    finished(item.name)
+                } else {
+                    announce(texts.left(item.name, item.quantity - command.count), step)
+                }
+            }
+            is VoiceCommand.Finish -> {
+                dialog = null
+                announce(texts.finishedMessage(command.item.name), repository.removeItem(command.item.id, finished = true))
+                finished(command.item.name)
+            }
+            is VoiceCommand.Add -> {
+                val space = command.space
+                // Where it goes is asked, as when food is added by hand; and a name that may be misheard is shown first.
+                if (space == null || !command.sure) {
+                    dialog = Dialog.AddFood(command.space, command.name, command.count)
+                } else {
+                    dialog = null
+                    val step = repository.addItem(command.name, space, command.count)
+                    val what = if (command.count > 1) "${command.count} ${command.name}" else command.name
+                    announce(texts.addedTo(what, spaces.firstOrNull { it.id == space }?.name.orEmpty()), step)
+                }
+            }
+            is VoiceCommand.Move -> {
+                val space = command.space
+                if (space == null) {
+                    dialog = Dialog.Move(command.item)
+                } else {
+                    dialog = null
+                    val step = repository.moveItem(command.item.id, space, command.count)
+                    announce(texts.movedTo(command.item.name, spaces.firstOrNull { it.id == space }?.name.orEmpty()), step)
+                }
+            }
+        }
+        return true
     }
 
     fun useOne(item: PantryItem) {
@@ -262,11 +318,18 @@ fun PantryScreen(
         },
         floatingActionButton = {
             if (spaces.isNotEmpty() && query == null) {
-                ExtendedFloatingActionButton(
-                    onClick = { dialog = Dialog.AddFood(null) },
-                    icon = { Icon(AppIcons.Add, contentDescription = null) },
-                    text = { Text(strings.addFood) },
-                )
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (voice != null && voiceLanguage != null) {
+                        SmallFloatingActionButton(onClick = { dialog = Dialog.Voice }) {
+                            Icon(AppIcons.Mic, contentDescription = strings.voiceCommand)
+                        }
+                    }
+                    ExtendedFloatingActionButton(
+                        onClick = { dialog = Dialog.AddFood(null) },
+                        icon = { Icon(AppIcons.Add, contentDescription = null) },
+                        text = { Text(strings.addFood) },
+                    )
+                }
             }
         },
     ) { padding ->
@@ -374,7 +437,14 @@ fun PantryScreen(
 
     when (val d = dialog) {
         null -> Unit
-        is Dialog.AddFood -> AddFoodDialog(repository, spaces, d.space, onDismiss = { dialog = null }) { name, space, quantity, expires, bought ->
+        is Dialog.AddFood -> AddFoodDialog(
+            repository,
+            spaces,
+            d.space,
+            initialName = d.name,
+            initialQuantity = d.quantity,
+            onDismiss = { dialog = null },
+        ) { name, space, quantity, expires, bought ->
             dialog = null
             val step = repository.addItem(name, space, quantity, expires, bought)
             announce(texts.addedTo(name, spaces.firstOrNull { it.id == space }?.name.orEmpty()), step)
@@ -445,6 +515,12 @@ fun PantryScreen(
             onDismiss = { dialog = null },
             onDone = { dialog = null },
         )
+        Dialog.Voice -> {
+            val language = voiceLanguage
+            if (voice != null && language != null) {
+                VoiceDialog(language, voice, words = { repository.voiceVocabulary(language) }, onHeard = ::obey, onDismiss = { dialog = null })
+            }
+        }
         Dialog.SharePantry -> SharePantryFlow(
             share = { link, join -> repository.sharePantry(link, texts.pantry, join) },
             onDismiss = { dialog = null },

@@ -41,21 +41,24 @@ import kotlinx.datetime.LocalDate
 
 /**
  * Puts food in the pantry. As the name is typed, known foods are offered, and the space the food
- * usually goes in is chosen, until the user picks one themselves. [initialSpace] starts on a space.
+ * usually goes in is chosen, until the user picks one themselves. [initialSpace] starts on a space;
+ * [initialName] and [initialQuantity] fill in what a voice command said.
  */
 @Composable
 fun AddFoodDialog(
     repository: PantryRepository,
     spaces: List<Space>,
     initialSpace: String? = null,
+    initialName: String = "",
+    initialQuantity: Int = 1,
     onDismiss: () -> Unit,
     onAdd: (name: String, space: String, quantity: Int, expires: LocalDate?, bought: LocalDate?) -> Unit,
 ) {
-    var field by remember { mutableStateOf(TextFieldValue("")) }
+    var field by remember { mutableStateOf(TextFieldValue(initialName, TextRange(initialName.length))) }
     val name = field.text
     var space by remember { mutableStateOf(initialSpace) }
     var spacePicked by remember { mutableStateOf(initialSpace != null) }
-    var quantity by remember { mutableStateOf(1) }
+    var quantity by remember { mutableStateOf(initialQuantity) }
     var expires by remember { mutableStateOf<LocalDate?>(null) }
     val today = repository.today()
     var bought by remember { mutableStateOf<LocalDate?>(today) }

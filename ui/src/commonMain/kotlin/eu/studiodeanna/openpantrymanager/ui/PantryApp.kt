@@ -29,9 +29,12 @@ import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
 import eu.studiodeanna.openpantrymanager.store.LanguageChoice
 import kotlinx.coroutines.launch
 
-/** The whole app. [scanner] reads receipts where the platform can; without one, scanning is not offered. */
+/**
+ * The whole app. [scanner] reads receipts and [voice] hears voice commands where the platform can;
+ * without them, scanning and voice commands are not offered.
+ */
 @Composable
-fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null) {
+fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null, voice: VoiceInput? = null) {
     val settings by repository.settings.collectAsState()
     val strings = when (settings.language) {
         LanguageChoice.English -> EnglishStrings
@@ -65,6 +68,7 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null) {
                             snackbars,
                             onShopping = { nav.navigate("shopping") },
                             onScan = scanner?.let { { nav.navigate("photos") } },
+                            voice = voice,
                         )
                     }
                     composable("photos") {

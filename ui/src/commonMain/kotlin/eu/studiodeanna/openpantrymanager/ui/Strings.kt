@@ -14,6 +14,8 @@ interface Strings {
     val messages: Messages
 
     val appName: String get() = "Open Pantry Manager"
+    /** The language's ISO 639-1 code, which picks its voice commands. */
+    val languageCode: String
     val back: String
     val more: String
     val fewer: String
@@ -144,6 +146,16 @@ interface Strings {
     fun syncedHoursAgo(hours: Long): String
     fun syncedDaysAgo(days: Long): String
 
+    // Voice commands
+    val voiceCommand: String
+    fun voiceModelNeeded(megabytes: Int): String
+    val download: String
+    fun downloading(percent: Int): String
+    val listening: String
+    val sayForExample: String
+    fun notUnderstood(heard: String): String
+    val heardNothing: String
+
     // Sharing the pantry
     val sharePantry: String
     val useSharedPantry: String
@@ -194,6 +206,7 @@ interface Strings {
 }
 
 object EnglishStrings : Strings {
+    override val languageCode = "en"
     override val messages = EnglishMessages
     override val back = "Back"
     override val more = "More"
@@ -216,6 +229,7 @@ object EnglishStrings : Strings {
     private fun describe(action: PantryAction) = when (action) {
         is PantryAction.AddedFood -> "added “${action.name}”"
         is PantryAction.UsedOne -> "used one “${action.name}”"
+        is PantryAction.UsedSome -> "used ${action.count} “${action.name}”"
         is PantryAction.Finished -> "finished “${action.name}”"
         is PantryAction.DeletedFood -> "deleted “${action.name}”"
         is PantryAction.EditedFood -> "edited “${action.name}”"
@@ -348,6 +362,17 @@ object EnglishStrings : Strings {
     override fun syncedHoursAgo(hours: Long) = if (hours == 1L) "Synced an hour ago" else "Synced $hours hours ago"
     override fun syncedDaysAgo(days: Long) = "Synced $days days ago"
 
+    override val voiceCommand = "Voice command"
+    override fun voiceModelNeeded(megabytes: Int) =
+        "To understand what you say, the app needs its English speech model, $megabytes MB. It is downloaded once, from " +
+            "alphacephei.com, the site of the Vosk speech recognizer; after that, what you say stays on this phone."
+    override val download = "Download"
+    override fun downloading(percent: Int) = "Downloading the speech model… $percent%"
+    override val listening = "Listening…"
+    override val sayForExample = "Say, for example:"
+    override fun notUnderstood(heard: String) = "I didn't understand “$heard”."
+    override val heardNothing = "I didn't hear anything."
+
     override val sharePantry = "Share the pantry"
     override val useSharedPantry = "Use a pantry shared from another phone"
     override val sharePantryIntro =
@@ -402,6 +427,7 @@ object EnglishStrings : Strings {
 }
 
 object ItalianStrings : Strings {
+    override val languageCode = "it"
     override val messages = ItalianMessages
     override val back = "Indietro"
     override val more = "Altro"
@@ -424,6 +450,7 @@ object ItalianStrings : Strings {
     private fun describe(action: PantryAction) = when (action) {
         is PantryAction.AddedFood -> "aggiunta di “${action.name}”"
         is PantryAction.UsedOne -> "consumo di “${action.name}”"
+        is PantryAction.UsedSome -> "consumo di ${action.count} “${action.name}”"
         is PantryAction.Finished -> "esaurimento di “${action.name}”"
         is PantryAction.DeletedFood -> "eliminazione di “${action.name}”"
         is PantryAction.EditedFood -> "modifica di “${action.name}”"
@@ -556,6 +583,17 @@ object ItalianStrings : Strings {
     override fun syncedMinutesAgo(minutes: Long) = "Sincronizzata $minutes min fa"
     override fun syncedHoursAgo(hours: Long) = if (hours == 1L) "Sincronizzata un'ora fa" else "Sincronizzata $hours ore fa"
     override fun syncedDaysAgo(days: Long) = "Sincronizzata $days giorni fa"
+
+    override val voiceCommand = "Comando vocale"
+    override fun voiceModelNeeded(megabytes: Int) =
+        "Per capire cosa dici, l'app ha bisogno del suo modello vocale italiano, $megabytes MB. Si scarica una volta sola da " +
+            "alphacephei.com, il sito del riconoscitore vocale Vosk; dopo, ciò che dici resta su questo telefono."
+    override val download = "Scarica"
+    override fun downloading(percent: Int) = "Download del modello vocale… $percent%"
+    override val listening = "Ti ascolto…"
+    override val sayForExample = "Di', per esempio:"
+    override fun notUnderstood(heard: String) = "Non ho capito “$heard”."
+    override val heardNothing = "Non ho sentito niente."
 
     override val sharePantry = "Condividi la dispensa"
     override val useSharedPantry = "Usa una dispensa condivisa da un altro telefono"

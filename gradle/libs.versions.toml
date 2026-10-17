@@ -13,6 +13,8 @@ androidxActivity = "1.13.0"
 # client, started with the app by a content provider of its own, and asks for network access: stay on
 # 1.28.0, which has neither, until it is built from source without it.
 onnxruntime = "1.28.0"
+vosk = "0.3.75"
+jna = "5.18.1"
 compileSdk = "37"
 minSdk = "26"
 targetSdk = "37"
@@ -39,6 +41,8 @@ compose-material3 = { module = "org.jetbrains.compose.material3:material3", vers
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime" }
 onnxruntime-jvm = { module = "com.microsoft.onnxruntime:onnxruntime", version.ref = "onnxruntime" }
+vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "vosk" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
