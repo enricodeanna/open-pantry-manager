@@ -19,9 +19,11 @@ import eu.studiodeanna.openpantrymanager.memory.changedTo
 import eu.studiodeanna.openpantrymanager.memory.combinedWith
 import eu.studiodeanna.openpantrymanager.memory.complete
 import eu.studiodeanna.openpantrymanager.memory.food
+import eu.studiodeanna.openpantrymanager.memory.forgetPhrase
 import eu.studiodeanna.openpantrymanager.memory.moveFor
 import eu.studiodeanna.openpantrymanager.memory.moved
 import eu.studiodeanna.openpantrymanager.memory.nextStamp
+import eu.studiodeanna.openpantrymanager.memory.phraseMeans
 import eu.studiodeanna.openpantrymanager.memory.placeFor
 import eu.studiodeanna.openpantrymanager.memory.placed
 import eu.studiodeanna.openpantrymanager.memory.receiptKey
@@ -70,8 +72,10 @@ import eu.studiodeanna.openpantrymanager.sync.nextcloudShareFor
 import eu.studiodeanna.openpantrymanager.sync.remoteFileFor
 import eu.studiodeanna.openpantrymanager.sync.syncDocument
 import eu.studiodeanna.openpantrymanager.sync.syncWith
+import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 import eu.studiodeanna.openpantrymanager.voice.VoiceCommand
 import eu.studiodeanna.openpantrymanager.voice.VoiceLanguage
+import eu.studiodeanna.openpantrymanager.voice.phraseToLearn
 import eu.studiodeanna.openpantrymanager.voice.understandVoice
 import eu.studiodeanna.openpantrymanager.voice.voiceVocabulary
 import io.ktor.client.HttpClient
@@ -333,6 +337,19 @@ class PantryRepository(
 
     /** The words for the speech recognizer to listen for in [language]: of commands, and of the food here. */
     fun voiceVocabulary(language: VoiceLanguage): List<String> = voiceVocabulary(language, _pantry.value, _memory.value)
+
+    /** The words of [heard], a sentence not understood, that the user could teach the app the meaning of; see [phraseToLearn]. */
+    fun phraseToLearn(heard: String, language: VoiceLanguage): String? = phraseToLearn(heard, language, _pantry.value, _memory.value)
+
+    /**
+     * Learns that [phrase], said in [language], means [action], from now on and, in a shared pantry,
+     * on every phone sharing it.
+     */
+    fun learnPhrase(language: VoiceLanguage, phrase: String, action: VoiceAction) =
+        learnNow(_memory.value.phraseMeans(language.code, phrase, action))
+
+    /** Forgets a phrase taught in [language], here and on every phone sharing the pantry. */
+    fun forgetPhrase(language: VoiceLanguage, phrase: String) = learnNow(_memory.value.forgetPhrase(language.code, phrase))
 
     /**
      * Takes an item out of the pantry, all of it: it is [finished], or thrown away, or was added by

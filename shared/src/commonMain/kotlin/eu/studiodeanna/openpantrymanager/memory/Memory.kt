@@ -1,6 +1,7 @@
 package eu.studiodeanna.openpantrymanager.memory
 
 import eu.studiodeanna.openpantrymanager.model.nameKey
+import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
 import kotlinx.serialization.Serializable
@@ -9,7 +10,8 @@ import kotlin.math.roundToInt
 /**
  * What the app has learned from the user: where each food usually goes, where it is usually moved to
  * from each space, how long it usually keeps, what it is called on the shopping list and in which
- * sublist, and what the lines of shop receipts mean. A shared pantry shares it too.
+ * sublist, what the lines of shop receipts mean, and the phrases the user taught voice commands. A
+ * shared pantry shares it too.
  *
  * Habits are weights that grow by one each time and fade a little whenever something else happens to
  * the same food, so a new habit takes over after being repeated a few times.
@@ -29,6 +31,8 @@ data class Memory(
     val packs: Map<String, Int> = emptyMap(),
     /** Receipt lines the user left out: not food, or not for the pantry (a bag, a deposit). */
     val skipped: Set<String> = emptySet(),
+    /** Phrases the user taught voice commands, by language (its ISO 639-1 code): the phrase, as [phraseText] keeps it → what it means. */
+    val phrases: Map<String, Map<String, VoiceAction>> = emptyMap(),
     /** By learned thing (see [entries]): its last change. Things learned before stamping have none. */
     val stamps: Map<String, Stamp> = emptyMap(),
 )
@@ -184,6 +188,30 @@ fun Memory.receiptSkips(line: String): Memory = copy(skipped = skipped + receipt
  */
 fun receiptKey(line: String): String =
     nameKey(line).split(' ').filter { word -> word.any { it.isLetter() } }.joinToString(" ")
+
+/** The phrases taught to voice commands in [language] (its ISO 639-1 code), and what each means. */
+fun Memory.phrasesIn(language: String): Map<String, VoiceAction> = phrases[language].orEmpty()
+
+/** A phrase as kept: lower case, its words as written (accents and apostrophes too), one space apart. */
+fun phraseText(phrase: String): String =
+    phrase.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).map { it.trim('\'') }.filter { it.isNotEmpty() }.joinToString(" ")
+
+/**
+ * Learns that [phrase], said to voice commands in [language] (its ISO 639-1 code), means [action],
+ * instead of what it meant before. Phrases differing only in accents are one.
+ */
+fun Memory.phraseMeans(language: String, phrase: String, action: VoiceAction): Memory {
+    val text = phraseText(phrase)
+    if (nameKey(text).isEmpty()) return this
+    val known = phrasesIn(language).filterKeys { nameKey(it) != nameKey(text) }
+    return copy(phrases = phrases + (language to known + (text to action)))
+}
+
+/** Forgets the phrase [phrase] taught to voice commands in [language]. */
+fun Memory.forgetPhrase(language: String, phrase: String): Memory {
+    val known = phrasesIn(language).filterKeys { nameKey(it) != nameKey(phrase) }
+    return copy(phrases = if (known.isEmpty()) phrases - language else phrases + (language to known))
+}
 
 /** Expiry days further away than this are taken for typing mistakes and not learned. */
 private const val MAX_KEEP_DAYS = 3 * 365

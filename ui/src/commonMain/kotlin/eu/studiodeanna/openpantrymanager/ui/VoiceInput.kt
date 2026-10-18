@@ -15,8 +15,8 @@ interface VoiceInput {
 
     /**
      * Listens until a sentence is said, showing what is heard so far through [partial]. Returns the
-     * sentence as heard freely, and as heard when listening for [words] only (of commands and food),
-     * which hears those better; or null when nothing was heard. Throws [VoiceFailed].
+     * sentence as heard freely (first, even if blank), and as heard when listening for [words] only (of
+     * commands and food), which hears those better; or null when nothing was heard. Throws [VoiceFailed].
      */
     suspend fun listen(language: VoiceLanguage, words: List<String>, partial: (String) -> Unit): List<String>?
 

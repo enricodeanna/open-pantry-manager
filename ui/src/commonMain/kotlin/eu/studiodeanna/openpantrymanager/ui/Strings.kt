@@ -8,6 +8,7 @@ import eu.studiodeanna.openpantrymanager.ItalianMessages
 import eu.studiodeanna.openpantrymanager.Messages
 import eu.studiodeanna.openpantrymanager.checklist.ListAction
 import eu.studiodeanna.openpantrymanager.model.PantryAction
+import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 
 /** The UI's texts in one language; [messages] are the matching ones raised by the shared code. */
 interface Strings {
@@ -155,6 +156,24 @@ interface Strings {
     val sayForExample: String
     fun notUnderstood(heard: String): String
     val heardNothing: String
+    fun didYouSay(heard: String): String
+    val yes: String
+    val no: String
+    val canTeach: String
+    val teachMe: String
+    val teachTitle: String
+    fun teachIntro(heard: String): String
+    val phraseWords: String
+    val phraseMeans: String
+    fun meaning(action: VoiceAction): String
+    val teachNote: String
+    val learn: String
+    val voiceCommands: String
+    fun taughtPhrases(count: Int): String
+    val taughtPhrasesTitle: String
+    val noTaughtPhrases: String
+    val addPhrase: String
+    fun forget(phrase: String): String
 
     // Sharing the pantry
     val sharePantry: String
@@ -372,6 +391,36 @@ object EnglishStrings : Strings {
     override val sayForExample = "Say, for example:"
     override fun notUnderstood(heard: String) = "I didn't understand “$heard”."
     override val heardNothing = "I didn't hear anything."
+    override fun didYouSay(heard: String) = "Did you say “$heard”?"
+    override val yes = "Yes"
+    override val no = "No"
+    override val canTeach = "If you said what you did in words I don't know, you can teach them to me."
+    override val teachMe = "Teach me"
+    override val teachTitle = "Teach me a phrase"
+    override fun teachIntro(heard: String) = "I heard “$heard”. Which words say what you did, and what do they mean?"
+    override val phraseWords = "Words"
+    override val phraseMeans = "They mean:"
+    override fun meaning(action: VoiceAction) = when (action) {
+        VoiceAction.Use -> "I used some: ate, drank, threw away"
+        VoiceAction.Finish -> "It is finished, all of it"
+        VoiceAction.Add -> "I bought it, or put it in the pantry"
+        VoiceAction.Move -> "I moved it to another space"
+    }
+    override val teachNote =
+        "The app will remember these words and understand them from now on, in any sentence and in their other " +
+            "forms. A shared pantry passes them on to the other phones. You can see and forget them in Settings."
+    override val learn = "Learn"
+    override val voiceCommands = "Voice commands"
+    override fun taughtPhrases(count: Int) = when (count) {
+        0 -> "No phrases taught yet."
+        1 -> "1 phrase taught."
+        else -> "$count phrases taught."
+    }
+    override val taughtPhrasesTitle = "Taught phrases"
+    override val noTaughtPhrases =
+        "None yet. When I don't understand a sentence, you can teach me its words; or add a phrase here."
+    override val addPhrase = "Add a phrase"
+    override fun forget(phrase: String) = "Forget “$phrase”"
 
     override val sharePantry = "Share the pantry"
     override val useSharedPantry = "Use a pantry shared from another phone"
@@ -594,6 +643,36 @@ object ItalianStrings : Strings {
     override val sayForExample = "Di', per esempio:"
     override fun notUnderstood(heard: String) = "Non ho capito “$heard”."
     override val heardNothing = "Non ho sentito niente."
+    override fun didYouSay(heard: String) = "Hai detto “$heard”?"
+    override val yes = "Sì"
+    override val no = "No"
+    override val canTeach = "Se hai detto cosa hai fatto con parole che non conosco, puoi insegnarmele."
+    override val teachMe = "Insegnamelo"
+    override val teachTitle = "Insegnami una frase"
+    override fun teachIntro(heard: String) = "Ho sentito “$heard”. Quali parole dicono cosa hai fatto, e cosa vogliono dire?"
+    override val phraseWords = "Parole"
+    override val phraseMeans = "Vogliono dire:"
+    override fun meaning(action: VoiceAction) = when (action) {
+        VoiceAction.Use -> "Ne ho usato un po': mangiato, bevuto, buttato"
+        VoiceAction.Finish -> "È finito, tutto"
+        VoiceAction.Add -> "L'ho comprato, o messo in dispensa"
+        VoiceAction.Move -> "L'ho spostato in un altro posto"
+    }
+    override val teachNote =
+        "L'app ricorderà queste parole e da ora le capirà in qualsiasi frase, anche nelle altre forme. Se la dispensa è " +
+            "condivisa, le capiranno anche gli altri telefoni. Puoi rivederle e dimenticarle nelle Impostazioni."
+    override val learn = "Impara"
+    override val voiceCommands = "Comandi vocali"
+    override fun taughtPhrases(count: Int) = when (count) {
+        0 -> "Nessuna frase insegnata."
+        1 -> "1 frase insegnata."
+        else -> "$count frasi insegnate."
+    }
+    override val taughtPhrasesTitle = "Frasi insegnate"
+    override val noTaughtPhrases =
+        "Ancora nessuna. Quando non capisco una frase, puoi insegnarmi le sue parole; oppure aggiungi qui una frase."
+    override val addPhrase = "Aggiungi una frase"
+    override fun forget(phrase: String) = "Dimentica “$phrase”"
 
     override val sharePantry = "Condividi la dispensa"
     override val useSharedPantry = "Usa una dispensa condivisa da un altro telefono"

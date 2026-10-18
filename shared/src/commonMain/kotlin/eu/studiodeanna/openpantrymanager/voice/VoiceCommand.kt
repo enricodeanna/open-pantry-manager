@@ -1,6 +1,7 @@
 package eu.studiodeanna.openpantrymanager.voice
 
 import eu.studiodeanna.openpantrymanager.memory.Memory
+import eu.studiodeanna.openpantrymanager.memory.phrasesIn
 import eu.studiodeanna.openpantrymanager.memory.placeFor
 import eu.studiodeanna.openpantrymanager.model.PantryDocument
 import eu.studiodeanna.openpantrymanager.model.PantryItem
@@ -9,6 +10,8 @@ import eu.studiodeanna.openpantrymanager.model.editDistance
 import eu.studiodeanna.openpantrymanager.model.liveItems
 import eu.studiodeanna.openpantrymanager.model.nameKey
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 /** What a sentence said to the app asks it to do. */
 sealed interface VoiceCommand {
@@ -20,7 +23,8 @@ sealed interface VoiceCommand {
 
     /**
      * [count] of the food [name] were bought, to go in [space]; null when the app cannot tell where.
-     * [sure]: the name is of food the pantry knows, or common food, rather than maybe a mishearing.
+     * [sure]: the name is of food the pantry knows, or common food, rather than maybe a mishearing, and
+     * the verb said it was bought, not maybe taken out ("ho preso il pane").
      */
     data class Add(val name: String, val count: Int, val space: String?, val sure: Boolean = true) : VoiceCommand
 
@@ -29,31 +33,87 @@ sealed interface VoiceCommand {
 
     /** Nothing the app could do: no verb it knows, or no food of the pantry. */
     data class NotUnderstood(val heard: String) : VoiceCommand
+
+    /**
+     * [command], understood only from [heard], the sentence as heard when listening for words of
+     * commands alone, while heard freely it had no verb: the verb may be a word not known forced into
+     * one known, so it is done only once the user says [heard] is what they said.
+     */
+    data class Check(val command: VoiceCommand, val heard: String) : VoiceCommand
 }
 
-private enum class Verb { Use, Finish, Add, Move }
+/** What the verb of a voice command says was done; also what a phrase the user taught the app means. */
+@Serializable
+enum class VoiceAction {
+    /** Some of a food was used: eaten, drunk, cooked, thrown away. */
+    @SerialName("use") Use,
+    /** A food is finished, all of it. */
+    @SerialName("finish") Finish,
+    /** Food was bought, or put in the pantry. */
+    @SerialName("add") Add,
+    /** Food was moved from one space to another. */
+    @SerialName("move") Move,
+}
 
 /**
- * What was heard asks to do, when it was heard in more ways than one ([heard], the likeliest first): the
- * first that makes a command about food the pantry has, or food it knows or common food; else the first
- * command at all, or that none was understood.
+ * What was heard asks to do, when it was heard in more ways than one ([heard]: freely first, then as
+ * words of commands and food): the first that makes a command about food the pantry has, or food it
+ * knows or common food; else the first command at all, or that none was understood.
+ *
+ * Listening for words it knows, the recognizer hears those better, but forces words it does not know
+ * into them: "il latte è scaduto" comes out as "latte pesca bevuto". So another hearing counts only
+ * near the free one, and when only it has a verb, what it says is to be checked with the user first.
  */
 fun understandVoice(heard: List<String>, language: VoiceLanguage, pantry: PantryDocument, memory: Memory): VoiceCommand {
-    val commands = heard.filter { it.isNotBlank() }.map { understandVoice(it, language, pantry, memory) }
-    return commands.firstOrNull { it !is VoiceCommand.NotUnderstood && (it !is VoiceCommand.Add || it.sure) }
+    val free = heard.firstOrNull().orEmpty()
+    val hearings = heard.filterIndexed { i, it -> it.isNotBlank() && (i == 0 || near(free, it)) }
+    val commands = hearings.map { understandVoice(it, language, pantry, memory) }
+    val chosen = commands.firstOrNull { it !is VoiceCommand.NotUnderstood && (it !is VoiceCommand.Add || it.sure) }
         ?: commands.firstOrNull { it !is VoiceCommand.NotUnderstood }
-        ?: commands.firstOrNull()
-        ?: VoiceCommand.NotUnderstood(heard.firstOrNull().orEmpty())
+        ?: return commands.firstOrNull() ?: VoiceCommand.NotUnderstood(heard.firstOrNull { it.isNotBlank() }.orEmpty())
+    // Of hearings doing the same to the same food, the last, of words alone, hears numbers better ("two", not "to").
+    val best = commands.indexOfLast { it::class == chosen::class && it.food() == chosen.food() }
+    val freeHasVerb = free.isNotBlank() && findVerb(words(free), language, memory.phrasesIn(language.code), BooleanArray(words(free).size)) != null
+    return if (hearings[best] == free || freeHasVerb) commands[best] else VoiceCommand.Check(commands[best], hearings[best])
 }
+
+/** The words of a sentence as compared: [nameKey]s. */
+private fun words(sentence: String): List<String> =
+    sentence.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map(::nameKey)
+
+/** The food a command is about: the item, or the name of food bought. */
+private fun VoiceCommand.food(): String? = when (this) {
+    is VoiceCommand.Use -> item.id
+    is VoiceCommand.Finish -> item.id
+    is VoiceCommand.Move -> item.id
+    is VoiceCommand.Add -> nameKey(name)
+    is VoiceCommand.NotUnderstood, is VoiceCommand.Check -> null
+}
+
+/** Whether two hearings of a sentence differ in few of their letters, as a word or two misheard do. */
+private fun near(a: String, b: String): Boolean {
+    val x = nameKey(a).replace(" ", "")
+    val y = nameKey(b).replace(" ", "")
+    return editDistance(x, y) <= maxOf(x.length, y.length) * NEAR
+}
+
+/**
+ * How many of their letters two hearings of a sentence may differ in: in tests, words misheard made
+ * a tenth or so ("se vuoi", "sei uova"); words forced into others, more than a third.
+ */
+private const val NEAR = 0.25
 
 /**
  * The words the recognizer is told to listen for, besides listening freely: those of commands in
- * [language], of common food, and of the food and spaces of [pantry] and the food [memory] knows.
+ * [language], built in and taught, of common food, and of the food and spaces of [pantry] and the food
+ * [memory] knows.
  */
 fun voiceVocabulary(language: VoiceLanguage, pantry: PantryDocument, memory: Memory): List<String> {
     val names = pantry.visibleSpaces().map { it.name } + pantry.liveItems().map { it.name } + memory.foods.values.map { it.name }
-    val words = language.use + language.finish + language.add + language.move + language.numbers.keys + language.all +
-        language.fillers + language.containers + language.into + language.from + language.foods
+    // Phrases taught are kept as written, apostrophes too ("c'è").
+    val words = language.use + language.finish + language.add + language.move + language.take + language.numbers.keys + language.all +
+        language.fillers + language.containers + language.into + language.from + language.foods + language.spoken +
+        memory.phrasesIn(language.code).keys
     return (words.flatMap { it.split(' ') } + names.flatMap { name -> name.lowercase().split(Regex("[^\\p{L}\\p{N}]+")) })
         .filter { it.isNotEmpty() }
         .distinct()
@@ -75,14 +135,20 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
     if (words.isEmpty()) return notUnderstood
     val taken = BooleanArray(words.size)
 
-    val verb = findVerb(words, language, taken) ?: return notUnderstood
+    val found = findVerb(words, language, memory.phrasesIn(language.code), taken) ?: return notUnderstood
     val spaces = pantry.visibleSpaces()
-    val (to, from) = findSpaces(words, language, spaces, taken, withoutPreposition = verb == Verb.Add || verb == Verb.Move)
+    val (to, from) = findSpaces(words, language, spaces, taken, withoutPreposition = !found.take && found.action != VoiceAction.Use && found.action != VoiceAction.Finish)
+    // Taken from a space of the pantry, food was used; taken elsewhere, it was bought.
+    val verb = if (found.take && from != null) VoiceAction.Use else found.action
     var count: Int? = null
     var all = false
+    var tens: Int? = null
     for (i in words.indices) {
         if (taken[i]) continue
-        val number = words[i].toIntOrNull() ?: language.numbers[words[i]]
+        var number = words[i].toIntOrNull() ?: language.numbers[words[i]]
+        // "Twenty four", as the recognizer writes it, is one number.
+        if (number != null && number < 10 && tens != null && taken.getOrNull(i - 1) == true) number += tens
+        tens = number?.takeIf { it in 20..90 && it % 10 == 0 }
         when {
             number != null -> count = maxOf(count ?: 0, number)
             words[i] in language.all -> all = true
@@ -99,7 +165,7 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
     val live = spaces.mapTo(HashSet()) { it.id }
     val items = pantry.liveItems().filter { it.space in live }
     return when (verb) {
-        Verb.Add -> {
+        VoiceAction.Add -> {
             val known = (items.map { it.name } + memory.foods.values.map { it.name })
                 .distinctBy(::nameKey)
                 .filter { sameFood(it, foodWords, language) }
@@ -108,36 +174,90 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
             val name = known ?: said.subList(food.first(), food.last() + 1).joinToString(" ").replaceFirstChar { it.uppercase() }
             val space = to ?: memory.placeFor(name, live)
             val common = language.foods.mapTo(HashSet(), ::nameKey)
-            val sure = known != null || meaningful(name, language).all { word -> common.any { sameWord(it, word, language) } }
+            val sure = !found.take && (known != null || meaningful(name, language).all { word -> common.any { sameWord(it, word, language) } })
             VoiceCommand.Add(name, count ?: 1, space, sure)
         }
         else -> {
-            val candidates = items.filter { (from == null || it.space == from) && (verb != Verb.Move || it.space != to) }
+            val candidates = items.filter { (from == null || it.space == from) && (verb != VoiceAction.Move || it.space != to) }
             val item = candidates
                 .filter { score(it.name, foodWords, language) > 0 }
                 .sortedWith(compareByDescending<PantryItem> { score(it.name, foodWords, language) }.thenBy { it.expires == null }.thenBy { it.expires })
                 .firstOrNull() ?: return notUnderstood
             when (verb) {
-                Verb.Finish -> VoiceCommand.Finish(item)
-                Verb.Use -> if (all) VoiceCommand.Finish(item) else VoiceCommand.Use(item, count ?: 1)
+                VoiceAction.Finish -> VoiceCommand.Finish(item)
+                VoiceAction.Use -> if (all) VoiceCommand.Finish(item) else VoiceCommand.Use(item, count ?: 1)
                 else -> VoiceCommand.Move(item, if (all || count == null) item.quantity else count, to)
             }
         }
     }
 }
 
-/** The verb of the sentence, its phrases of more than one word first; marks its words [taken]. */
-private fun findVerb(words: List<String>, language: VoiceLanguage, taken: BooleanArray): Verb? {
-    val verbs = listOf(Verb.Finish to language.finish, Verb.Move to language.move, Verb.Add to language.add, Verb.Use to language.use)
-    for (length in 3 downTo 1) {
-        for (start in 0..words.size - length) {
-            val phrase = words.subList(start, start + length).joinToString(" ")
-            val verb = verbs.firstOrNull { (_, forms) -> phrase in forms }?.first ?: continue
+/** What the verb of a sentence says was done; [take], taken: used if from a space of the pantry, else bought. */
+private data class Verb(val action: VoiceAction, val take: Boolean = false)
+
+/**
+ * The verb of the sentence, the first one said, as a phrase the user taught ([learned]) or one of the
+ * language; where several start at the same word, a phrase taught first, and the longest ("mi hanno
+ * dato", received, not "hanno dato", given away). Marks its words [taken]. A phrase taught is heard in
+ * any of its forms ("regalato" is also "regalate").
+ */
+private fun findVerb(words: List<String>, language: VoiceLanguage, learned: Map<String, VoiceAction>, taken: BooleanArray): Verb? {
+    val taught = learned.map { (phrase, action) -> nameKey(phrase).split(' ').filter { it.isNotEmpty() } to Verb(action) }
+        .filter { it.first.isNotEmpty() }
+        .sortedByDescending { it.first.size }
+    val verbs = listOf(
+        Verb(VoiceAction.Finish) to language.finish,
+        Verb(VoiceAction.Move) to language.move,
+        Verb(VoiceAction.Add) to language.add,
+        Verb(VoiceAction.Use) to language.use,
+        Verb(VoiceAction.Add, take = true) to language.take,
+    )
+    val longest = verbs.maxOf { (_, forms) -> forms.maxOfOrNull { it.count { c -> c == ' ' } + 1 } ?: 1 }
+    for (start in words.indices) {
+        fun found(length: Int, verb: Verb): Verb {
             for (i in start until start + length) taken[i] = true
             return verb
         }
+        for ((phrase, verb) in taught) {
+            if (start + phrase.size > words.size) continue
+            val said = phrase.indices.all { words[start + it] == phrase[it] || language.stem(words[start + it]) == language.stem(phrase[it]) }
+            if (said) return found(phrase.size, verb)
+        }
+        for (length in minOf(longest, words.size - start) downTo 1) {
+            val phrase = words.subList(start, start + length).joinToString(" ")
+            verbs.firstOrNull { (_, forms) -> phrase in forms }?.let { return found(length, it.first) }
+        }
     }
     return null
+}
+
+/**
+ * The words of [heard] that may say what was done in a way the app does not know yet, for the user to
+ * teach it: the first run of words that are not food, numbers, spaces nor small words, as said. Null
+ * when the sentence has a verb the app knows already (then it was the food it could not tell), or has
+ * no such words.
+ */
+fun phraseToLearn(heard: String, language: VoiceLanguage, pantry: PantryDocument, memory: Memory): String? {
+    val said = heard.lowercase().split(Regex("[^\\p{L}\\p{N}']+")).map { it.trim('\'') }.filter { it.isNotEmpty() }
+    val keys = said.map { nameKey(it).split(' ').filter(String::isNotEmpty) }
+    if (findVerb(keys.flatten(), language, memory.phrasesIn(language.code), BooleanArray(keys.sumOf { it.size })) != null) return null
+
+    // Small words may sit inside a phrase ("buttato via", "run out of"); numbers and food end it.
+    val glue = language.fillers + language.into + language.from
+    val small = glue + language.containers + language.all + language.numbers.keys
+    val named = (pantry.visibleSpaces().map { it.name } + pantry.liveItems().map { it.name } + memory.foods.values.map { it.name } + language.foods)
+        .flatMap { meaningful(it, language) }
+        .toSet()
+    fun isKnown(i: Int) = keys[i].all { word -> word in small || word.toIntOrNull() != null || named.any { sameWord(it, word, language) } }
+
+    val start = said.indices.firstOrNull { !isKnown(it) } ?: return null
+    var end = start
+    var i = start + 1
+    while (i < said.size && (!isKnown(i) || keys[i].all { it in glue })) {
+        if (!isKnown(i)) end = i
+        i++
+    }
+    return said.subList(start, end + 1).joinToString(" ")
 }
 
 /**

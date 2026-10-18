@@ -310,6 +310,9 @@ fun SettingsDialog(
     onSharePantry: () -> Unit,
     onStopSharing: () -> Unit,
     onSyncNow: () -> Unit,
+    /** How many phrases were taught to voice commands; null where there are none. */
+    taughtPhrases: Int?,
+    onTaughtPhrases: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -355,6 +358,11 @@ fun SettingsDialog(
                 ) {
                     Checkbox(checked = settings.offerShopping, onCheckedChange = null, modifier = Modifier.padding(12.dp))
                     Text(strings.offerShopping, style = MaterialTheme.typography.bodyLarge)
+                }
+                if (taughtPhrases != null) {
+                    Text(strings.voiceCommands, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
+                    Text(strings.taughtPhrases(taughtPhrases), style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = onTaughtPhrases) { Text(strings.taughtPhrasesTitle) }
                 }
                 Text(strings.theme, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                 ThemeChoice.entries.forEach { choice ->

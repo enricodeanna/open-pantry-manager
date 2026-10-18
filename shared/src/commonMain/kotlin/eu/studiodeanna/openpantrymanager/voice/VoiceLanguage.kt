@@ -31,6 +31,11 @@ class VoiceLanguage(
     val add: Set<String>,
     /** Verbs saying food was moved from one space to another. */
     val move: Set<String>,
+    /**
+     * Verbs saying food was taken: from a space of the pantry, it was used ("ho preso due uova dal
+     * frigorifero"); else it was bought ("ho preso il pane"), which is shown to check before it is added.
+     */
+    val take: Set<String> = emptySet(),
     /** Numbers as said, up to what one buys at once. */
     val numbers: Map<String, Int>,
     /** Words saying all of it. */
@@ -53,6 +58,12 @@ class VoiceLanguage(
     val foods: Set<String>,
     /** Sentences to show as examples, in the user's own words. */
     val examples: List<String>,
+    /**
+     * Words of the commands above as the recognizer writes them, where that differs from how they are
+     * compared: with accents and apostrophes ("più", "c'è", "we're"). The recognizer is told to listen
+     * for these too.
+     */
+    val spoken: Set<String> = emptySet(),
 )
 
 /** The languages voice commands are understood in. */

@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.memory
 
+import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -45,6 +46,28 @@ class MemorySyncTest {
         val merged = base.merge(onA)
         assertTrue("shopper bio" in merged.skipped)
         assertNull(merged.receipt["shopper bio"])
+    }
+
+    @Test
+    fun aPhraseTaughtOnOnePhoneIsKnownOnTheOthersAndSoIsForgettingIt() {
+        val base = Memory().learn("a", 1) { it.placed("Latte", "fridge", 1, today) }
+        val onA = base.learn("a", 3) { it.phraseMeans("it", "Mi hanno regalato", VoiceAction.Add).phraseMeans("en", "nicked", VoiceAction.Use) }
+        val onB = base.learn("b", 4) { it.phraseMeans("it", "è scaduto", VoiceAction.Finish) }
+        val merged = onA.merge(onB)
+        assertEquals(mapOf("mi hanno regalato" to VoiceAction.Add, "è scaduto" to VoiceAction.Finish), merged.phrasesIn("it"))
+        assertEquals(mapOf("nicked" to VoiceAction.Use), merged.phrasesIn("en"))
+        assertEquals(merged, onB.merge(onA))
+
+        // Taught again with another meaning, the same phrase however written: one phrase, the latest meaning.
+        val retaught = merged.learn("b", 5) { it.phraseMeans("it", "E scaduto", VoiceAction.Use) }
+        assertEquals(VoiceAction.Use, merged.merge(retaught).phrasesIn("it")["e scaduto"])
+        assertNull(merged.merge(retaught).phrasesIn("it")["è scaduto"])
+
+        val forgotten = merged.learn("a", 6) { it.forgetPhrase("en", "nicked") }
+        assertEquals(emptyMap(), merged.merge(forgotten).phrasesIn("en"))
+        // Kept in the phone's file, and read back.
+        val json = Json.encodeToString(Memory.serializer(), merged)
+        assertEquals(merged, Json.decodeFromString(Memory.serializer(), json))
     }
 
     @Test

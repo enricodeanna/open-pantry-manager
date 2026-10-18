@@ -9,6 +9,9 @@ import eu.studiodeanna.openpantrymanager.sync.FakeNextcloud
 import eu.studiodeanna.openpantrymanager.sync.RemoteException
 import eu.studiodeanna.openpantrymanager.sync.SharedPantry
 import eu.studiodeanna.openpantrymanager.sync.SharedPantryCodec
+import eu.studiodeanna.openpantrymanager.voice.Italian
+import eu.studiodeanna.openpantrymanager.voice.VoiceAction
+import eu.studiodeanna.openpantrymanager.voice.VoiceCommand
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
@@ -62,6 +65,30 @@ class PantrySharingTest {
         b.syncPantry()
         assertEquals(listOf("Latte"), b.names())
         assertEquals(1, b.pantry.value.liveItems().single().quantity)
+    }
+
+    @Test
+    fun aPhraseTaughtOnOnePhoneIsUnderstoodOnTheOther() = runTest {
+        val a = phone()
+        val fridge = a.addSpace("Frigorifero")
+        a.addItem("Latte", fridge, 2)
+        a.sharePantry(cloud.link, "Dispensa")
+        val b = phone()
+        b.sharePantry(cloud.link, "Dispensa")
+        assertTrue(b.understand(listOf("il latte è scaduto"), Italian) is VoiceCommand.NotUnderstood)
+
+        a.learnPhrase(Italian, b.phraseToLearn("il latte è scaduto", Italian)!!, VoiceAction.Finish)
+        a.syncPantry()
+        b.syncPantry()
+        val latte = b.pantry.value.liveItems().single()
+        assertEquals(VoiceCommand.Finish(latte), b.understand(listOf("il latte è scaduto"), Italian))
+        assertTrue("\"scaduto\": \"finish\"" in cloud.file("Dispensa.pantry")!!)
+
+        // Forgotten on one, forgotten on both.
+        b.forgetPhrase(Italian, "scaduto")
+        b.syncPantry()
+        a.syncPantry()
+        assertTrue(a.understand(listOf("il latte è scaduto"), Italian) is VoiceCommand.NotUnderstood)
     }
 
     @Test
@@ -175,6 +202,6 @@ class PantrySharingTest {
         assertFailsWith<RemoteException> { phone(http = pantryShare.http).linkShoppingList(pantryShare.link) }
         assertEquals(before, pantryShare.content)
         assertTrue(runCatching { ListCodec.decode(before!!) }.isSuccess, "an empty pantry of format 1 does parse as a list")
-        assertTrue(runCatching { ListCodec.decode(SharedPantryCodec.encode(SharedPantry())) }.isFailure, "format 2 does not")
+        assertTrue(runCatching { ListCodec.decode(SharedPantryCodec.encode(SharedPantry())) }.isFailure, "a newer format does not")
     }
 }

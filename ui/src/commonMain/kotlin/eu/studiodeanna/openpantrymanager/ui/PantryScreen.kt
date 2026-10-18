@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import eu.studiodeanna.openpantrymanager.PantryRepository
 import eu.studiodeanna.openpantrymanager.SyncState
 import eu.studiodeanna.openpantrymanager.UndoStep
+import eu.studiodeanna.openpantrymanager.memory.phrasesIn
 import eu.studiodeanna.openpantrymanager.model.PantryItem
 import eu.studiodeanna.openpantrymanager.model.Space
 import eu.studiodeanna.openpantrymanager.model.itemsBySpace
@@ -104,6 +105,7 @@ private sealed interface Dialog {
     data object LinkShopping : Dialog
     data object SharePantry : Dialog
     data object Settings : Dialog
+    data object TaughtPhrases : Dialog
 }
 
 /**
@@ -127,6 +129,7 @@ fun PantryScreen(
     val shopping by repository.shopping.collectAsState()
     val sharing by repository.sharing.collectAsState()
     val undoState by repository.undoState.collectAsState()
+    val memory by repository.memory.collectAsState()
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -174,16 +177,18 @@ fun PantryScreen(
 
     // Voice commands are understood in the language the app speaks, when there are some for it.
     val voiceLanguage = remember(texts) { VoiceLanguages.forCode(texts.languageCode) }
+    val taughtPhrases = voiceLanguage?.takeIf { voice != null }?.let { memory.phrasesIn(it.code) }
 
-    /** Does what a sentence heard says; false when it makes no sense, for the voice dialog to say so. */
-    fun obey(heard: List<String>): Boolean {
-        val language = voiceLanguage ?: return false
+    /** Does what a sentence heard says, or tells the voice dialog it makes no sense, or what to check first. */
+    fun obey(heard: List<String>): Obeyed {
+        val language = voiceLanguage ?: return Obeyed.NotUnderstood
         when (val command = repository.understand(heard, language)) {
-            is VoiceCommand.NotUnderstood -> return false
+            is VoiceCommand.NotUnderstood -> return Obeyed.NotUnderstood
+            is VoiceCommand.Check -> return Obeyed.IfSaid(command.heard)
             is VoiceCommand.Use -> {
                 dialog = null
                 val item = command.item
-                val (step, last) = repository.useSome(item.id, command.count) ?: return true
+                val (step, last) = repository.useSome(item.id, command.count) ?: return Obeyed.Done
                 if (last) {
                     announce(texts.finishedMessage(item.name), step)
                     finished(item.name)
@@ -219,7 +224,7 @@ fun PantryScreen(
                 }
             }
         }
-        return true
+        return Obeyed.Done
     }
 
     fun useOne(item: PantryItem) {
@@ -518,7 +523,26 @@ fun PantryScreen(
         Dialog.Voice -> {
             val language = voiceLanguage
             if (voice != null && language != null) {
-                VoiceDialog(language, voice, words = { repository.voiceVocabulary(language) }, onHeard = ::obey, onDismiss = { dialog = null })
+                VoiceDialog(
+                    language,
+                    voice,
+                    words = { repository.voiceVocabulary(language) },
+                    onHeard = ::obey,
+                    teach = { repository.phraseToLearn(it, language) },
+                    onLearn = { phrase, action -> repository.learnPhrase(language, phrase, action) },
+                    onDismiss = { dialog = null },
+                )
+            }
+        }
+        Dialog.TaughtPhrases -> {
+            val language = voiceLanguage
+            if (language != null && taughtPhrases != null) {
+                TaughtPhrasesDialog(
+                    taughtPhrases,
+                    onLearn = { phrase, action -> repository.learnPhrase(language, phrase, action) },
+                    onForget = { repository.forgetPhrase(language, it) },
+                    onDismiss = { dialog = Dialog.Settings },
+                )
             }
         }
         Dialog.SharePantry -> SharePantryFlow(
@@ -536,6 +560,8 @@ fun PantryScreen(
             onSharePantry = { dialog = Dialog.SharePantry },
             onStopSharing = { scope.launch { repository.stopSharingPantry() } },
             onSyncNow = { repository.syncNow() },
+            taughtPhrases = taughtPhrases?.size,
+            onTaughtPhrases = { dialog = Dialog.TaughtPhrases },
             onDismiss = { dialog = null },
         )
     }

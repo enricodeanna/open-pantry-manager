@@ -137,7 +137,8 @@ class VoskVoiceInput(private val activity: ComponentActivity) : VoiceInput {
                     field(free.partialResult, "partial").takeIf { it.isNotBlank() }?.let(partial)
                 }
             }
-            listOf(field(free.finalResult, "text"), field(limited.finalResult, "text")).filter { it.isNotBlank() }.ifEmpty { null }
+            // Free first even when it heard nothing: what the words alone heard is weighed against it.
+            listOf(field(free.finalResult, "text"), field(limited.finalResult, "text")).takeIf { heard -> heard.any { it.isNotBlank() } }
         }
 
     override fun finish() {
