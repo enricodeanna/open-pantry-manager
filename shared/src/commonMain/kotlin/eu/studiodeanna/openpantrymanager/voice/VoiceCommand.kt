@@ -21,6 +21,9 @@ sealed interface VoiceCommand {
     /** [item] is finished, all of it. */
     data class Finish(val item: PantryItem) : VoiceCommand
 
+    /** [count] closed boxes of [item] were opened. */
+    data class Open(val item: PantryItem, val count: Int) : VoiceCommand
+
     /**
      * [count] of the food [name] were bought, to go in [space]; null when the app cannot tell where.
      * [sure]: the name is of food the pantry knows, or common food, rather than maybe a mishearing, and
@@ -53,6 +56,8 @@ enum class VoiceAction {
     @SerialName("add") Add,
     /** Food was moved from one space to another. */
     @SerialName("move") Move,
+    /** A box of a food was opened. */
+    @SerialName("open") Open,
 }
 
 /**
@@ -85,6 +90,7 @@ private fun words(sentence: String): List<String> =
 private fun VoiceCommand.food(): String? = when (this) {
     is VoiceCommand.Use -> item.id
     is VoiceCommand.Finish -> item.id
+    is VoiceCommand.Open -> item.id
     is VoiceCommand.Move -> item.id
     is VoiceCommand.Add -> nameKey(name)
     is VoiceCommand.NotUnderstood, is VoiceCommand.Check -> null
@@ -111,7 +117,7 @@ private const val NEAR = 0.25
 fun voiceVocabulary(language: VoiceLanguage, pantry: PantryDocument, memory: Memory): List<String> {
     val names = pantry.visibleSpaces().map { it.name } + pantry.liveItems().map { it.name } + memory.foods.values.map { it.name }
     // Phrases taught are kept as written, apostrophes too ("c'è").
-    val words = language.use + language.finish + language.add + language.move + language.take + language.numbers.keys + language.all +
+    val words = language.use + language.finish + language.add + language.move + language.take + language.open + language.numbers.keys + language.all +
         language.fillers + language.containers + language.into + language.from + language.foods + language.spoken +
         memory.phrasesIn(language.code).keys
     return (words.flatMap { it.split(' ') } + names.flatMap { name -> name.lowercase().split(Regex("[^\\p{L}\\p{N}]+")) })
@@ -123,9 +129,11 @@ fun voiceVocabulary(language: VoiceLanguage, pantry: PantryDocument, memory: Mem
  * What [heard], a sentence in [language], asks to do with the pantry [pantry]: which food, how many,
  * from and to which space. A verb of the language says what happened; numbers say how many (one,
  * unless said; all of it, to move); the food is the pantry's food named most nearly, whatever the order
- * of the words and the plural, and of food of the same name, the one expiring soonest, as the one
- * eaten first. What was bought may be food the pantry has never had: its name is what was said, and
- * it goes where [memory] says it usually goes, or where it was said to go.
+ * of the words and the plural, and of food of the same name, an opened box first (a closed one, to
+ * open), then the one expiring soonest, as the one eaten first. Food in boxes is used as a tap uses it:
+ * used, with no number said, a closed box is opened, an opened one taken out. What was bought may be
+ * food the pantry has never had: its name is what was said, and it goes where [memory] says it usually
+ * goes, or where it was said to go.
  */
 fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocument, memory: Memory): VoiceCommand {
     val notUnderstood = VoiceCommand.NotUnderstood(heard.trim())
@@ -178,14 +186,27 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
             VoiceCommand.Add(name, count ?: 1, space, sure)
         }
         else -> {
-            val candidates = items.filter { (from == null || it.space == from) && (verb != VoiceAction.Move || it.space != to) }
+            val candidates = items.filter {
+                (from == null || it.space == from) && (verb != VoiceAction.Move || it.space != to) && (verb != VoiceAction.Open || it.opened == null)
+            }
             val item = candidates
                 .filter { score(it.name, foodWords, language) > 0 }
-                .sortedWith(compareByDescending<PantryItem> { score(it.name, foodWords, language) }.thenBy { it.expires == null }.thenBy { it.expires })
+                .sortedWith(
+                    compareByDescending<PantryItem> { score(it.name, foodWords, language) }
+                        // Used or finished, the box already open; a closed one is opened (candidates above).
+                        .thenBy { (verb == VoiceAction.Use || verb == VoiceAction.Finish) && it.opened == null }
+                        .thenBy { it.expires == null }
+                        .thenBy { it.expires },
+                )
                 .firstOrNull() ?: return notUnderstood
             when (verb) {
                 VoiceAction.Finish -> VoiceCommand.Finish(item)
-                VoiceAction.Use -> if (all) VoiceCommand.Finish(item) else VoiceCommand.Use(item, count ?: 1)
+                VoiceAction.Open -> VoiceCommand.Open(item, if (all) item.quantity else count ?: 1)
+                VoiceAction.Use -> when {
+                    all -> VoiceCommand.Finish(item)
+                    count == null && item.boxed && item.opened == null -> VoiceCommand.Open(item, 1)
+                    else -> VoiceCommand.Use(item, count ?: 1)
+                }
                 else -> VoiceCommand.Move(item, if (all || count == null) item.quantity else count, to)
             }
         }
@@ -211,6 +232,7 @@ private fun findVerb(words: List<String>, language: VoiceLanguage, learned: Map<
         Verb(VoiceAction.Add) to language.add,
         Verb(VoiceAction.Use) to language.use,
         Verb(VoiceAction.Add, take = true) to language.take,
+        Verb(VoiceAction.Open) to language.open,
     )
     val longest = verbs.maxOf { (_, forms) -> forms.maxOfOrNull { it.count { c -> c == ' ' } + 1 } ?: 1 }
     for (start in words.indices) {

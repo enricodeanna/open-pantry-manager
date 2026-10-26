@@ -54,6 +54,8 @@ val Italian = VoiceLanguage(
     move = participles("spostat", "trasferit", "portat") +
         setOf("sposto", "spostiamo", "trasferisco", "porto", "portiamo", "sposta", "trasferisci", "porta"),
     take = participles("pres") + setOf("prendo", "prendiamo"),
+    // "Ho iniziato i biscotti": a new packet started is opened.
+    open = participles("apert", "iniziat", "cominciat") + setOf("apro", "apriamo", "apri", "inizio", "iniziamo", "comincio", "cominciamo"),
     numbers = mapOf(
         "un" to 1, "uno" to 1, "una" to 1, "due" to 2, "tre" to 3, "quattro" to 4, "cinque" to 5, "sei" to 6,
         "sette" to 7, "otto" to 8, "nove" to 9, "dieci" to 10, "undici" to 11, "dodici" to 12, "tredici" to 13,
@@ -117,6 +119,6 @@ val Italian = VoiceLanguage(
             "detersivo sapone dentifricio shampoo carta igienica tovaglioli fazzoletti spugne candeggina ammorbidente " +
             "pannolini crocchette"
         ).split(" ").toSet(),
-    examples = listOf("ho mangiato una mela", "ho comprato sei uova", "ho spostato il latte in frigorifero", "ho finito la pasta"),
+    examples = listOf("ho mangiato una mela", "ho comprato sei uova", "ho spostato il latte in frigorifero", "ho aperto i biscotti", "ho finito la pasta"),
     spoken = setOf("più", "c'è", "n'è", "è", "già", "po'", "l'ho", "l'", "un'", "dell'", "nell'", "all'", "dall'", "sull'", "ventitré"),
 )

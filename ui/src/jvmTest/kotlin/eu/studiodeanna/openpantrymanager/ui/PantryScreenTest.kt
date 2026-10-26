@@ -64,4 +64,29 @@ class PantryScreenTest {
         onNodeWithContentDescription("Ripeti").assertIsEnabled().performClick()
         assertEquals(listOf("Latte"), repository.pantry.value.liveItems().map { it.name })
     }
+
+    @Test
+    fun aBoxIsOpenedByATapOnItsCountAndOpeningTheLastOneOffersTheShoppingList() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        val cabinet = repository.addSpace("Credenza")
+        repository.addItem("Biscotti", cabinet, 2, boxed = true)
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) {
+                    PantryScreen(repository, SnackbarHostState(), onShopping = {}, onScan = {})
+                }
+            }
+        }
+        onNodeWithContentDescription("Apri una confezione: Biscotti").performClick()
+        // The opened box is listed apart, before the closed one; one is still closed, so nothing to buy yet.
+        onNodeWithContentDescription("Segna come finita la confezione aperta: Biscotti").assertExists()
+        onNodeWithText("Aperto oggi").assertExists()
+        onNodeWithText("Aperta l'ultima confezione: Biscotti").assertDoesNotExist()
+        assertEquals(listOf(1, 1), repository.pantry.value.liveItems().map { it.quantity })
+
+        onNodeWithContentDescription("Apri una confezione: Biscotti").performClick()
+        onNodeWithText("Aperta l'ultima confezione: Biscotti").assertExists()
+        assertEquals(0, repository.pantry.value.liveItems().count { it.opened == null })
+    }
 }

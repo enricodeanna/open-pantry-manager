@@ -164,6 +164,7 @@ private fun combine(a: Food, b: Food): Food {
             ?: listOfNotNull(a.keepsDays, b.keepsDays).takeIf { it.isNotEmpty() }?.average()?.toInt(),
         sublist = newer.sublist ?: older.sublist,
         shoppingName = newer.shoppingName ?: older.shoppingName,
+        boxed = newer.boxed ?: older.boxed,
     )
 }
 

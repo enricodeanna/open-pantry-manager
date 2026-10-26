@@ -41,8 +41,8 @@ import kotlinx.datetime.LocalDate
 
 /**
  * Puts food in the pantry. As the name is typed, known foods are offered, and the space the food
- * usually goes in is chosen, until the user picks one themselves. [initialSpace] starts on a space;
- * [initialName] and [initialQuantity] fill in what a voice command said.
+ * usually goes in is chosen, and whether it comes in boxes, until the user picks themselves.
+ * [initialSpace] starts on a space; [initialName] and [initialQuantity] fill in what a voice command said.
  */
 @Composable
 fun AddFoodDialog(
@@ -52,7 +52,7 @@ fun AddFoodDialog(
     initialName: String = "",
     initialQuantity: Int = 1,
     onDismiss: () -> Unit,
-    onAdd: (name: String, space: String, quantity: Int, expires: LocalDate?, bought: LocalDate?) -> Unit,
+    onAdd: (name: String, space: String, quantity: Int, expires: LocalDate?, bought: LocalDate?, boxed: Boolean) -> Unit,
 ) {
     var field by remember { mutableStateOf(TextFieldValue(initialName, TextRange(initialName.length))) }
     val name = field.text
@@ -64,13 +64,15 @@ fun AddFoodDialog(
     var bought by remember { mutableStateOf<LocalDate?>(today) }
     val usual = remember(name) { repository.placeFor(name) }
     val food = remember(name) { repository.food(name) }
+    var boxedPicked by remember { mutableStateOf<Boolean?>(null) }
+    val boxed = boxedPicked ?: (food?.boxed == true)
     val suggestions = remember(name) { repository.complete(name).filterNot { nameKey(it.name) == nameKey(name) }.take(4) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(usual) { if (!spacePicked && usual != null) space = usual }
     val chosen = space?.takeIf { id -> spaces.any { it.id == id } }
     val ok = name.isNotBlank() && chosen != null
     fun add() {
-        if (ok) onAdd(name.trim(), chosen, quantity, expires, bought)
+        if (ok) onAdd(name.trim(), chosen, quantity, expires, bought, boxed)
     }
 
     AlertDialog(
@@ -121,6 +123,7 @@ fun AddFoodDialog(
                     Text(strings.howMany, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                     QuantityStepper(quantity, { quantity = it })
                 }
+                BoxedField(boxed) { boxedPicked = it }
                 BoughtField(bought, today) { bought = it }
                 ExpiryField(expires, today, food?.keepsDays, from = bought ?: today) { expires = it }
             }
@@ -131,7 +134,10 @@ fun AddFoodDialog(
     )
 }
 
-/** Changes an item, or takes it out: finished (which may offer the shopping list) or deleted. */
+/**
+ * Changes an item, or takes it out: finished (which may offer the shopping list) or deleted. Food in
+ * boxes can be marked opened (today, unless it was already) or closed again.
+ */
 @Composable
 fun ItemDialog(
     item: PantryItem,
@@ -139,7 +145,7 @@ fun ItemDialog(
     today: LocalDate,
     keepsDays: Int?,
     onDismiss: () -> Unit,
-    onSave: (name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate?) -> Unit,
+    onSave: (name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate?, boxed: Boolean, opened: LocalDate?) -> Unit,
     onFinished: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -148,6 +154,8 @@ fun ItemDialog(
     var expires by remember { mutableStateOf(item.expires) }
     var space by remember { mutableStateOf(item.space) }
     var bought by remember { mutableStateOf(item.bought) }
+    var boxed by remember { mutableStateOf(item.boxed) }
+    var opened by remember { mutableStateOf(item.opened) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.editFood) },
@@ -167,6 +175,12 @@ fun ItemDialog(
                     Text(strings.howMany, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                     QuantityStepper(quantity, { quantity = it })
                 }
+                BoxedField(boxed) { boxed = it }
+                if (boxed) {
+                    CheckRow(opened?.let { "${strings.boxOpened} · ${strings.shortDate(it, today)}" } ?: strings.boxOpened, opened != null) {
+                        opened = if (it) item.opened ?: today else null
+                    }
+                }
                 BoughtField(bought, today) { bought = it }
                 ExpiryField(expires, today, keepsDays, from = bought ?: today) { expires = it }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -176,7 +190,10 @@ fun ItemDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(name, quantity, expires, space, bought) }, enabled = name.isNotBlank()) { Text(strings.save) }
+            TextButton(
+                onClick = { onSave(name, quantity, expires, space, bought, boxed, opened.takeIf { boxed }) },
+                enabled = name.isNotBlank(),
+            ) { Text(strings.save) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
@@ -229,4 +246,20 @@ fun MoveDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
+}
+
+/** Whether food comes in boxes or packets, which are opened before they are finished. */
+@Composable
+private fun BoxedField(boxed: Boolean, onChange: (Boolean) -> Unit) {
+    Column {
+        CheckRow(strings.inBoxes, boxed, onChange)
+        if (boxed) {
+            Text(
+                strings.inBoxesHelp,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 48.dp),
+            )
+        }
+    }
 }

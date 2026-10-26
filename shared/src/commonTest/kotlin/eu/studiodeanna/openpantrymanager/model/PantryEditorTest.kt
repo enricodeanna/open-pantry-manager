@@ -98,4 +98,50 @@ class PantryEditorTest {
         d = editor.moveItem(d, milk, fridge, 1)
         assertEquals(listOf(LocalDate(2026, 10, 8), LocalDate(2026, 10, 8)), d.liveItems().map { it.bought })
     }
+
+    @Test
+    fun openingABoxListsItApartAndOnlyClosedOnesAreCountedTogether() {
+        val (doc, cabinet, fridge) = pantry()
+        val date = LocalDate(2026, 12, 12)
+        val day = LocalDate(2026, 10, 26)
+        var (d, cookies) = editor.addItem(doc, "Cookies", cabinet, 2, date, boxed = true)
+        val (opened, openedId) = editor.open(d, cookies, day)
+        d = opened
+        assertEquals(
+            listOf(Triple(1, null, true), Triple(1, day, true)),
+            d.named("Cookies").sortedBy { it.opened != null }.map { Triple(it.quantity, it.opened, it.boxed) },
+        )
+        assertEquals(date, d.item(openedId)?.expires)
+        assertEquals(1, d.unopened("cookies"))
+
+        // Bought again, the new box joins the closed one, not the opened one.
+        d = editor.addItem(d, "Cookies", cabinet, 1, date, boxed = true).first
+        assertEquals(2, d.item(cookies)?.quantity)
+        assertEquals(1, d.item(openedId)?.quantity)
+
+        // Moved, an opened box stays apart from closed ones there too.
+        d = editor.moveItem(d, cookies, fridge)
+        d = editor.moveItem(d, openedId, fridge)
+        assertEquals(2, d.named("Cookies").size)
+
+        // The last closed boxes opened the same day join the box opened there; then none is left unopened.
+        d = editor.open(d, cookies, day, count = 5).first
+        assertNull(d.item(cookies))
+        assertEquals(3, d.item(openedId)?.quantity)
+        assertEquals(0, d.unopened("Cookies"))
+
+        // With no box of it open, the last closed box is itself the opened item.
+        val (later, rice) = editor.addItem(d, "Rice", cabinet, 1)
+        d = editor.open(later, rice, day).first
+        assertEquals(Triple(1, day, true), d.item(rice)?.let { Triple(it.quantity, it.opened, it.boxed) })
+    }
+
+    @Test
+    fun opensFirstAmongTheSameFoodOfTheSameDay() {
+        val (doc, cabinet, _) = pantry()
+        val date = LocalDate(2026, 12, 12)
+        var (d, cookies) = editor.addItem(doc, "Cookies", cabinet, 2, date, boxed = true)
+        d = editor.open(d, cookies, LocalDate(2026, 10, 26)).first
+        assertEquals(listOf(true, false), d.itemsBySpace().getValue(cabinet).map { it.opened != null })
+    }
 }

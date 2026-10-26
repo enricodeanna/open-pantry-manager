@@ -9,9 +9,9 @@ import kotlin.math.roundToInt
 
 /**
  * What the app has learned from the user: where each food usually goes, where it is usually moved to
- * from each space, how long it usually keeps, what it is called on the shopping list and in which
- * sublist, what the lines of shop receipts mean, and the phrases the user taught voice commands. A
- * shared pantry shares it too.
+ * from each space, how long it usually keeps, whether it comes in boxes, what it is called on the
+ * shopping list and in which sublist, what the lines of shop receipts mean, and the phrases the user
+ * taught voice commands. A shared pantry shares it too.
  *
  * Habits are weights that grow by one each time and fade a little whenever something else happens to
  * the same food, so a new habit takes over after being repeated a few times.
@@ -60,6 +60,8 @@ data class Food(
     val sublist: String? = null,
     /** What it is called on the shopping list, when the user named it otherwise there ("Latte" for "Latte p.s."). */
     val shoppingName: String? = null,
+    /** Whether it comes in boxes, opened before it is used up, as the user said last; null if never said. */
+    val boxed: Boolean? = null,
 )
 
 /** How quickly an old habit fades each time the same food is handled differently. */
@@ -117,6 +119,13 @@ internal fun typicalKeep(keeps: List<Int>): Int? {
 
 /** How many of the latest keeping times count: enough to steady it, few enough to follow a new brand. */
 private const val KEEPS_COUNTED = 5
+
+/** Remembers whether [name] comes in boxes, opened before it is used up. */
+fun Memory.boxed(name: String, boxed: Boolean): Memory =
+    if (food(name)?.boxed == boxed) this else withFood(name) { it.copy(boxed = boxed) }
+
+/** Whether [name] comes in boxes, as far as the app knows. */
+fun Memory.isBoxed(name: String): Boolean = food(name)?.boxed == true
 
 /** Remembers that [name] was moved from one space to another. */
 fun Memory.moved(name: String, from: String, to: String): Memory =

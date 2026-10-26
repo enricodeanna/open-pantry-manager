@@ -71,6 +71,12 @@ interface Strings {
     fun deleteTitle(name: String): String
     val deleteSpaceMessage: String
     fun usedOne(name: String): String
+    /** Tapping the count of closed boxes: one is opened. */
+    fun openOne(name: String): String
+    /** Tapping the count of an opened box: it is finished. */
+    fun finishOpened(name: String): String
+    /** Since when a box is open, [days] before today. */
+    fun openedAgo(days: Int): String
     val readingReceipt: String
     val nothingOnReceipt: String
     val scanFailed: String
@@ -79,6 +85,7 @@ interface Strings {
     fun addedTo(name: String, space: String): String
     fun movedTo(name: String, space: String): String
     fun finishedMessage(name: String): String
+    fun openedMessage(name: String): String
     fun left(name: String, count: Int): String
     fun deleted(name: String): String
     fun onShoppingList(name: String): String
@@ -103,6 +110,9 @@ interface Strings {
     val noOtherSpace: String
     val starMeansUsual: String
     fun allOf(count: Int): String
+    val inBoxes: String
+    val inBoxesHelp: String
+    val boxOpened: String
 
     // Expiry
     /** Short month names, January first. */
@@ -113,6 +123,8 @@ interface Strings {
 
     // Shopping list
     fun finishedTitle(name: String): String
+    /** When the last closed box of [name] was opened. */
+    fun lastOpenedTitle(name: String): String
     val linkToAddFinished: String
     val addToShopping: String
     val nameOnList: String
@@ -249,6 +261,7 @@ object EnglishStrings : Strings {
         is PantryAction.AddedFood -> "added “${action.name}”"
         is PantryAction.UsedOne -> "used one “${action.name}”"
         is PantryAction.UsedSome -> "used ${action.count} “${action.name}”"
+        is PantryAction.Opened -> "opened “${action.name}”"
         is PantryAction.Finished -> "finished “${action.name}”"
         is PantryAction.DeletedFood -> "deleted “${action.name}”"
         is PantryAction.EditedFood -> "edited “${action.name}”"
@@ -301,6 +314,13 @@ object EnglishStrings : Strings {
     override fun deleteTitle(name: String) = "Delete “$name”?"
     override val deleteSpaceMessage = "The food listed in it is deleted too."
     override fun usedOne(name: String) = "Mark one $name as used"
+    override fun openOne(name: String) = "Open a box of $name"
+    override fun finishOpened(name: String) = "Mark the open $name as finished"
+    override fun openedAgo(days: Int) = when (days) {
+        0 -> "Opened today"
+        1 -> "Opened yesterday"
+        else -> "Opened $days days ago"
+    }
     override val readingReceipt = "Reading the receipt…"
     override val nothingOnReceipt =
         "No products found on the receipt. Try again with the whole receipt flat and in focus."
@@ -309,6 +329,7 @@ object EnglishStrings : Strings {
     override fun addedTo(name: String, space: String) = "$name put in $space"
     override fun movedTo(name: String, space: String) = "$name moved to $space"
     override fun finishedMessage(name: String) = "$name finished"
+    override fun openedMessage(name: String) = "$name opened"
     override fun left(name: String, count: Int) = "$name: $count left"
     override fun deleted(name: String) = "$name deleted"
     override fun onShoppingList(name: String) = "$name is on the shopping list"
@@ -332,6 +353,9 @@ object EnglishStrings : Strings {
     override val noOtherSpace = "There is no other space yet. Add one from the menu."
     override val starMeansUsual = "★ is where it usually goes from here."
     override fun allOf(count: Int) = "All $count"
+    override val inBoxes = "Comes in a box or packet"
+    override val inBoxesHelp = "Tapping its number opens one; the next tap finishes it."
+    override val boxOpened = "Opened"
 
     override val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     override fun expired(daysAgo: Int) = if (daysAgo == 1) "Expired yesterday" else "Expired $daysAgo days ago"
@@ -343,6 +367,7 @@ object EnglishStrings : Strings {
     override fun expiresOn(date: String) = "Expires $date"
 
     override fun finishedTitle(name: String) = "$name is finished"
+    override fun lastOpenedTitle(name: String) = "Last $name opened"
     override val linkToAddFinished =
         "Link a shopping list from Open Check Lists, and finished food can go straight on it."
     override val addToShopping = "Add to the shopping list"
@@ -405,6 +430,7 @@ object EnglishStrings : Strings {
         VoiceAction.Finish -> "It is finished, all of it"
         VoiceAction.Add -> "I bought it, or put it in the pantry"
         VoiceAction.Move -> "I moved it to another space"
+        VoiceAction.Open -> "I opened a box or packet of it"
     }
     override val teachNote =
         "The app will remember these words and understand them from now on, in any sentence and in their other " +
@@ -500,6 +526,7 @@ object ItalianStrings : Strings {
         is PantryAction.AddedFood -> "aggiunta di “${action.name}”"
         is PantryAction.UsedOne -> "consumo di “${action.name}”"
         is PantryAction.UsedSome -> "consumo di ${action.count} “${action.name}”"
+        is PantryAction.Opened -> "apertura di “${action.name}”"
         is PantryAction.Finished -> "esaurimento di “${action.name}”"
         is PantryAction.DeletedFood -> "eliminazione di “${action.name}”"
         is PantryAction.EditedFood -> "modifica di “${action.name}”"
@@ -553,6 +580,13 @@ object ItalianStrings : Strings {
     override fun deleteTitle(name: String) = "Eliminare “$name”?"
     override val deleteSpaceMessage = "Vengono eliminati anche gli alimenti che contiene."
     override fun usedOne(name: String) = "Segna come consumato: $name"
+    override fun openOne(name: String) = "Apri una confezione: $name"
+    override fun finishOpened(name: String) = "Segna come finita la confezione aperta: $name"
+    override fun openedAgo(days: Int) = when (days) {
+        0 -> "Aperto oggi"
+        1 -> "Aperto ieri"
+        else -> "Aperto da $days giorni"
+    }
     override val readingReceipt = "Lettura dello scontrino…"
     override val nothingOnReceipt =
         "Nessun prodotto trovato sullo scontrino. Riprova con lo scontrino intero, ben steso e a fuoco."
@@ -561,6 +595,7 @@ object ItalianStrings : Strings {
     override fun addedTo(name: String, space: String) = "Aggiunto in $space: $name"
     override fun movedTo(name: String, space: String) = "Spostato in $space: $name"
     override fun finishedMessage(name: String) = "Finito: $name"
+    override fun openedMessage(name: String) = "Aperto: $name"
     override fun left(name: String, count: Int) = "$name: ne restano $count"
     override fun deleted(name: String) = "Eliminato: $name"
     override fun onShoppingList(name: String) = "$name è nella lista della spesa"
@@ -584,6 +619,9 @@ object ItalianStrings : Strings {
     override val noOtherSpace = "Non c'è ancora un altro spazio. Aggiungilo dal menu."
     override val starMeansUsual = "★ è dove va di solito da qui."
     override fun allOf(count: Int) = "Tutti e $count"
+    override val inBoxes = "In confezione (scatola, pacco…)"
+    override val inBoxesHelp = "Toccando il numero si apre una confezione; il tocco dopo la segna come finita."
+    override val boxOpened = "Aperta"
 
     override val months = listOf("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
     override fun expired(daysAgo: Int) = if (daysAgo == 1) "Scaduto ieri" else "Scaduto da $daysAgo giorni"
@@ -595,6 +633,7 @@ object ItalianStrings : Strings {
     override fun expiresOn(date: String) = "Scade il $date"
 
     override fun finishedTitle(name: String) = "Finito: $name"
+    override fun lastOpenedTitle(name: String) = "Aperta l'ultima confezione: $name"
     override val linkToAddFinished =
         "Collega una lista della spesa di Open Check Lists, e ciò che finisce può andarci direttamente."
     override val addToShopping = "Aggiungi alla lista della spesa"
@@ -657,6 +696,7 @@ object ItalianStrings : Strings {
         VoiceAction.Finish -> "È finito, tutto"
         VoiceAction.Add -> "L'ho comprato, o messo in dispensa"
         VoiceAction.Move -> "L'ho spostato in un altro posto"
+        VoiceAction.Open -> "Ne ho aperto una confezione"
     }
     override val teachNote =
         "L'app ricorderà queste parole e da ora le capirà in qualsiasi frase, anche nelle altre forme. Se la dispensa è " +

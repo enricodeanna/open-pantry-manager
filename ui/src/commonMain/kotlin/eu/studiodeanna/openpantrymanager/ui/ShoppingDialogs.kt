@@ -59,6 +59,8 @@ fun ShoppingPromptDialog(
     similar: (String) -> List<Item>,
     initialText: String = name,
     askName: Boolean = false,
+    /** It comes up because the last closed box of [name] was opened, not because it is finished. */
+    lastOpened: Boolean = false,
     onDismiss: () -> Unit,
     onLink: () -> Unit,
     onAdd: (text: String, sublist: Sublist) -> Unit,
@@ -67,7 +69,7 @@ fun ShoppingPromptDialog(
     if (shopping == null) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(strings.finishedTitle(name)) },
+            title = { Text(if (lastOpened) strings.lastOpenedTitle(name) else strings.finishedTitle(name)) },
             text = { Text(strings.linkToAddFinished) },
             confirmButton = { TextButton(onClick = onLink) { Text(strings.linkShoppingList) } },
             dismissButton = { TextButton(onClick = onDismiss) { Text(strings.notNow) } },

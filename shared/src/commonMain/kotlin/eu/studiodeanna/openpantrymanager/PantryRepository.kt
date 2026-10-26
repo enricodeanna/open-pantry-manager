@@ -18,7 +18,9 @@ import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.changedTo
 import eu.studiodeanna.openpantrymanager.memory.combinedWith
 import eu.studiodeanna.openpantrymanager.memory.complete
+import eu.studiodeanna.openpantrymanager.memory.boxed
 import eu.studiodeanna.openpantrymanager.memory.food
+import eu.studiodeanna.openpantrymanager.memory.isBoxed
 import eu.studiodeanna.openpantrymanager.memory.forgetPhrase
 import eu.studiodeanna.openpantrymanager.memory.moveFor
 import eu.studiodeanna.openpantrymanager.memory.moved
@@ -50,6 +52,7 @@ import eu.studiodeanna.openpantrymanager.model.pantryChangeBetween
 import eu.studiodeanna.openpantrymanager.model.pruned
 import eu.studiodeanna.openpantrymanager.model.space
 import eu.studiodeanna.openpantrymanager.model.state
+import eu.studiodeanna.openpantrymanager.model.unopened
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
 import eu.studiodeanna.openpantrymanager.receipt.OcrLine
 import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
@@ -122,6 +125,13 @@ sealed interface Sublist {
 
 /** Thrown by [PantryRepository.linkShoppingList] when a shared folder holds several lists to choose from. */
 class ListChoiceNeeded(val link: ShareLink, val lists: List<SharedList>) : RemoteException(Messages.current.chooseList)
+
+/**
+ * What taking food did: called [action], undone by [step]; [left] of the item stay in the pantry.
+ * [ranOut]: none of that food is left unopened now (the last one finished, the last box opened), so
+ * it may go on the shopping list.
+ */
+data class Taken(val action: PantryAction, val step: UndoStep?, val left: Int, val ranOut: Boolean)
 
 /** The shared pantry this device is in, and how syncing it goes. */
 data class PantrySharing(val link: ShareLink, val sync: SyncState)
@@ -283,23 +293,52 @@ class PantryRepository(
     // Food
 
     /**
-     * Puts food in a space, bought on [bought] (today, unless said otherwise; null if not known), and
-     * learns that it goes there and, with an [expires] day, how long it keeps. Returns what undoes it.
+     * Puts food in a space, bought on [bought] (today, unless said otherwise; null if not known), in
+     * closed boxes if [boxed] (null: as that food came last time), and learns that it goes there, whether
+     * it comes in boxes and, with an [expires] day, how long it keeps. Returns what undoes it.
      */
-    fun addItem(name: String, space: String, quantity: Int = 1, expires: LocalDate? = null, bought: LocalDate? = today()): UndoStep? =
-        edit(PantryAction.AddedFood(name.trim()), { editor.addItem(it, name, space, quantity, expires, bought).first }) {
-            it.placed(name, space, now(), today(), expires, bought)
+    fun addItem(
+        name: String,
+        space: String,
+        quantity: Int = 1,
+        expires: LocalDate? = null,
+        bought: LocalDate? = today(),
+        boxed: Boolean? = null,
+    ): UndoStep? {
+        val inBoxes = boxed ?: _memory.value.isBoxed(name)
+        return edit(PantryAction.AddedFood(name.trim()), { editor.addItem(it, name, space, quantity, expires, bought, inBoxes).first }) {
+            val placed = it.placed(name, space, now(), today(), expires, bought)
+            if (boxed != null) placed.boxed(name, boxed) else placed
         }
+    }
 
-    /** Changes an item; a new space counts as moving it there. */
-    fun editItem(id: String, name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate? = null): UndoStep? {
+    /**
+     * Changes an item, and whether it comes in boxes and since when they are open (null: closed); a new
+     * space counts as moving it there. Opening its last closed box, the food may go on the shopping list.
+     */
+    fun editItem(
+        id: String,
+        name: String,
+        quantity: Int,
+        expires: LocalDate?,
+        space: String,
+        bought: LocalDate? = null,
+        boxed: Boolean = _pantry.value.item(id)?.boxed ?: false,
+        opened: LocalDate? = _pantry.value.item(id)?.opened,
+    ): Taken? {
         val item = _pantry.value.item(id) ?: return null
-        return edit(PantryAction.EditedFood(name.trim()), { doc ->
-            val edited = editor.editItem(doc, id, name, quantity, expires, bought)
+        val before = _pantry.value
+        val action = PantryAction.EditedFood(name.trim())
+        val step = edit(action, { doc ->
+            val edited = editor.editItem(doc, id, name, quantity, expires, bought, boxed, opened)
             if (space != item.space) editor.moveItem(edited, id, space) else edited
         }) { memory ->
-            if (space != item.space) memory.moved(name, item.space, space) else memory
+            val moved = if (space != item.space) memory.moved(name, item.space, space) else memory
+            if (boxed != item.boxed) moved.boxed(name, boxed) else moved
         }
+        val after = _pantry.value
+        val openedNow = item.opened == null && boxed && opened != null && nameKey(name) == nameKey(item.name)
+        return Taken(action, step, quantity, openedNow && ranOut(item.name, before, after))
     }
 
     /** Moves [count] of an item to [space] and learns where that food goes from where it was. */
@@ -311,25 +350,52 @@ class PantryRepository(
         }
     }
 
-    /** Takes one of an item. Returns what undoes it, and whether that was the last one. */
-    fun useOne(id: String): Pair<UndoStep?, Boolean>? {
+    /**
+     * What a tap on an item's count does: a closed box is opened (see [open]); anything else, one is
+     * taken, the last one out of the pantry.
+     */
+    fun useOne(id: String): Taken? {
         val item = _pantry.value.item(id) ?: return null
-        val last = item.quantity <= 1
-        val action = if (last) PantryAction.Finished(item.name) else PantryAction.UsedOne(item.name)
-        return edit(action, { editor.useOne(it, id) }) to last
+        return if (item.boxed && item.opened == null) open(id) else useSome(id, 1)
     }
 
-    /** Takes [count] of an item. Returns what undoes it, and whether that was all of it. */
-    fun useSome(id: String, count: Int): Pair<UndoStep?, Boolean>? {
+    /** Takes [count] of an item, whole boxes too; all of it when that is its quantity or more. */
+    fun useSome(id: String, count: Int): Taken? {
         val item = _pantry.value.item(id) ?: return null
-        val last = item.quantity <= count
         val action = when {
-            last -> PantryAction.Finished(item.name)
+            item.quantity <= count -> PantryAction.Finished(item.name)
             count == 1 -> PantryAction.UsedOne(item.name)
             else -> PantryAction.UsedSome(item.name, count)
         }
-        return edit(action, { editor.useSome(it, id, count) }) to last
+        return taking(item, action, { editor.useSome(it, id, count) })
     }
+
+    /**
+     * Opens [count] closed boxes of an item today: they are listed apart, as opened, and the next tap
+     * takes them out. Food not in boxes so far comes in boxes from now on, here and when bought again.
+     */
+    fun open(id: String, count: Int = 1): Taken? {
+        val item = _pantry.value.item(id)?.takeIf { it.opened == null } ?: return null
+        return taking(item, PantryAction.Opened(item.name), { editor.open(it, id, today(), count).first }) { it.boxed(item.name, true) }
+    }
+
+    /** Takes all of an item out of the pantry: it is finished. */
+    fun finish(id: String): Taken? {
+        val item = _pantry.value.item(id) ?: return null
+        return taking(item, PantryAction.Finished(item.name), { editor.removeItem(it, id) })
+    }
+
+    /** Takes some of [item] with [change], called [action], and says what that did. */
+    private fun taking(item: PantryItem, action: PantryAction, change: (PantryDocument) -> PantryDocument, learn: (Memory) -> Memory = { it }): Taken {
+        val before = _pantry.value
+        val step = edit(action, change, learn)
+        val after = _pantry.value
+        return Taken(action, step, after.item(item.id)?.quantity ?: 0, ranOut(item.name, before, after))
+    }
+
+    /** Whether going from [before] to [after] left none of the food [name] unopened, where there was some. */
+    private fun ranOut(name: String, before: PantryDocument, after: PantryDocument): Boolean =
+        before.unopened(name) > 0 && after.unopened(name) == 0
 
     /** What was [heard] in [language] (in more ways than one, the likeliest first) asks to do; nothing is done yet. */
     fun understand(heard: List<String>, language: VoiceLanguage): VoiceCommand =
@@ -352,13 +418,12 @@ class PantryRepository(
     fun forgetPhrase(language: VoiceLanguage, phrase: String) = learnNow(_memory.value.forgetPhrase(language.code, phrase))
 
     /**
-     * Takes an item out of the pantry, all of it: it is [finished], or thrown away, or was added by
-     * mistake. Returns what undoes it.
+     * Takes an item out of the pantry, all of it: thrown away, or added by mistake ([finish] when it is
+     * finished). Returns what undoes it.
      */
-    fun removeItem(id: String, finished: Boolean = false): UndoStep? {
+    fun removeItem(id: String): UndoStep? {
         val item = _pantry.value.item(id) ?: return null
-        val action = if (finished) PantryAction.Finished(item.name) else PantryAction.DeletedFood(item.name)
-        return edit(action, { editor.removeItem(it, id) })
+        return edit(PantryAction.DeletedFood(item.name), { editor.removeItem(it, id) })
     }
 
     /**
@@ -446,8 +511,9 @@ class PantryRepository(
     fun saveReceipt(entries: List<ReceiptEntry>, bought: LocalDate? = today()): Pair<UndoStep?, Int> {
         val spaces = liveSpaces()
         val kept = entries.filter { it.include && it.name.isNotBlank() && it.space in spaces }
+        val known = _memory.value
         val step = edit(PantryAction.PutAway(kept.sumOf { it.quantity }), { doc ->
-            kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought).first }
+            kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought, known.isBoxed(e.name)).first }
         }) { memory ->
             entries.fold(memory) { m, e ->
                 // Products the user added by hand have no receipt line to learn.

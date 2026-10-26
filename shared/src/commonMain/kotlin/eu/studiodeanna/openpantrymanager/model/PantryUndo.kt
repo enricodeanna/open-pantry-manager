@@ -20,6 +20,7 @@ sealed interface PantryAction {
     data class AddedFood(val name: String) : PantryAction
     data class UsedOne(val name: String) : PantryAction
     data class UsedSome(val name: String, val count: Int) : PantryAction
+    data class Opened(val name: String) : PantryAction
     data class Finished(val name: String) : PantryAction
     data class DeletedFood(val name: String) : PantryAction
     data class EditedFood(val name: String) : PantryAction

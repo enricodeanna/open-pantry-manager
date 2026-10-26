@@ -36,6 +36,8 @@ class VoiceLanguage(
      * frigorifero"); else it was bought ("ho preso il pane"), which is shown to check before it is added.
      */
     val take: Set<String> = emptySet(),
+    /** Verbs saying a box of food was opened. */
+    val open: Set<String> = emptySet(),
     /** Numbers as said, up to what one buys at once. */
     val numbers: Map<String, Int>,
     /** Words saying all of it. */

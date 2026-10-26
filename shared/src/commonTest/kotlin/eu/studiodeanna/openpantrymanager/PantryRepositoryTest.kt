@@ -241,4 +241,80 @@ class PantryRepositoryTest {
         // Bread was pending already: not added twice.
         assertEquals(1, repo.shopping.value!!.doc.items.count { it.text == "Bread" && !it.deleted })
     }
+
+    @Test
+    fun aTapOpensABoxTheNextFinishesItAndTheLastBoxOpenedAsksToBuyMore() = runTest {
+        val repo = repository()
+        repo.load()
+        val cabinet = repo.addSpace("Cabinet")
+        val date = LocalDate(2026, 12, 12)
+        repo.addItem("Cookies", cabinet, 2, date, boxed = true)
+        val cookies = repo.pantry.value.liveItems().single()
+
+        // Two boxes: one opened, listed apart; one closed is left, so there is no need to buy more.
+        val opened = repo.useOne(cookies.id)!!
+        assertEquals(PantryAction.Opened("Cookies"), opened.action)
+        assertEquals(false, opened.ranOut)
+        val open = repo.pantry.value.liveItems().single { it.opened != null }
+        assertEquals(Triple(1, LocalDate(2026, 10, 14), date), Triple(open.quantity, open.opened, open.expires))
+        assertEquals(1, repo.pantry.value.item(cookies.id)?.quantity)
+
+        // Undone, the two are one again.
+        repo.undo()
+        assertEquals(listOf(2 to null), repo.pantry.value.liveItems().map { it.quantity to it.opened })
+        repo.redo()
+
+        // The next tap on the opened box finishes it, without asking: a closed one is left.
+        val finished = repo.useOne(open.id)!!
+        assertEquals(PantryAction.Finished("Cookies") to false, finished.action to finished.ranOut)
+        // The last closed box opened: time to buy more.
+        assertEquals(true, repo.useOne(cookies.id)!!.ranOut)
+        // Finishing it, then, asks no more.
+        assertEquals(PantryAction.Finished("Cookies") to false, repo.useOne(cookies.id)!!.let { it.action to it.ranOut })
+        assertEquals(emptyList(), repo.pantry.value.liveItems())
+    }
+
+    @Test
+    fun foodLeftUnderOtherDatesIsNotOfferedForTheShoppingList() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        repo.addItem("Milk", fridge, 1, LocalDate(2026, 10, 20))
+        repo.addItem("milk", fridge, 1)
+        val (first, second) = repo.pantry.value.liveItems().sortedBy { it.expires == null }
+        assertEquals(false, repo.useOne(first.id)!!.ranOut)
+        assertEquals(true, repo.finish(second.id)!!.ranOut)
+
+        // Deleted, not finished: nothing to buy.
+        repo.addItem("Bread", fridge)
+        repo.removeItem(repo.pantry.value.liveItems().single().id)
+    }
+
+    @Test
+    fun learnsWhichFoodComesInBoxes() = runTest {
+        val repo = repository()
+        repo.load()
+        val cabinet = repo.addSpace("Cabinet")
+        repo.addItem("Cereals", cabinet, boxed = true)
+        // Added again without saying, as from the quick field or a receipt, it comes in a box.
+        repo.addItem("cereals", cabinet, 1, LocalDate(2027, 1, 1))
+        assertEquals(listOf(true, true), repo.pantry.value.liveItems().map { it.boxed })
+        assertEquals(true, repo.food("Cereals")?.boxed)
+
+        // Food opened by voice that was not in boxes comes in boxes from now on.
+        repo.addItem("Rice", cabinet)
+        val rice = repo.pantry.value.liveItems().single { it.name == "Rice" }
+        assertEquals(true, repo.open(rice.id)!!.ranOut)
+        assertEquals(true, repo.food("rice")?.boxed)
+
+        // Marked opened in its dialog, the last closed box asks to buy more too; a rename alone does not.
+        val cereals = repo.pantry.value.liveItems().first { it.name == "Cereals" }
+        assertEquals(false, repo.editItem(cereals.id, "Muesli", 1, null, cabinet)!!.ranOut)
+        val muesli = repo.pantry.value.item(cereals.id)!!
+        assertEquals(true, repo.editItem(muesli.id, "Muesli", 1, null, cabinet, opened = LocalDate(2026, 10, 14))!!.ranOut)
+        // Not in boxes after all: it is not opened either, and the app learns that.
+        repo.editItem(muesli.id, "Muesli", 1, null, cabinet, boxed = false)
+        assertEquals(false to null, repo.pantry.value.item(muesli.id)!!.let { it.boxed to it.opened })
+        assertEquals(false, repo.food("Muesli")?.boxed)
+    }
 }

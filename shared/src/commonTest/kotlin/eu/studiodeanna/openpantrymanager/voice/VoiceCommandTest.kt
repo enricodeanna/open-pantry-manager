@@ -220,4 +220,31 @@ class VoiceCommandTest {
     fun everyLanguageOfTheAppHasVoiceCommands() {
         assertEquals(setOf("en", "it"), VoiceLanguages.all.map { it.code }.toSet())
     }
+
+    @Test
+    fun boxesAreOpenedThenFinished() {
+        var doc = PantryDocument()
+        val (withSpace, cabinet) = editor.addSpace(doc, "Dispensa")
+        doc = withSpace
+        val (withCookies, cookies) = editor.addItem(doc, "Biscotti", cabinet, 2, LocalDate(2026, 12, 12), boxed = true)
+        doc = withCookies
+        fun said(heard: String, language: VoiceLanguage = Italian) = understandVoice(heard, language, doc, Memory())
+        val closed = doc.items.single { it.id == cookies }
+
+        assertEquals(VoiceCommand.Open(closed, 1), said("ho aperto i biscotti"))
+        assertEquals(VoiceCommand.Open(closed, 1), said("ho iniziato un pacco di biscotti"))
+        assertEquals(VoiceCommand.Open(closed, 1), said("I opened the biscotti", English))
+        // Eaten, with no number said, a closed box is opened, as a tap does; with one said, boxes are gone.
+        assertEquals(VoiceCommand.Open(closed, 1), said("ho mangiato i biscotti"))
+        assertEquals(VoiceCommand.Use(closed, 2), said("ho mangiato due pacchi di biscotti"))
+
+        val (opened, openedId) = editor.open(doc, cookies, today)
+        doc = opened
+        val open = doc.items.single { it.id == openedId }
+        val stillClosed = doc.items.single { it.id == cookies }
+        // Finished or eaten: the opened box, though both expire the same day; opened again: the closed one.
+        assertEquals(VoiceCommand.Finish(open), said("ho finito i biscotti"))
+        assertEquals(VoiceCommand.Use(open, 1), said("ho mangiato i biscotti"))
+        assertEquals(VoiceCommand.Open(stillClosed, 1), said("ho aperto i biscotti"))
+    }
 }

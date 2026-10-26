@@ -348,17 +348,7 @@ fun SettingsDialog(
                     Text(strings.linkedTo(shopping.doc.title), style = MaterialTheme.typography.bodyMedium)
                     TextButton(onClick = onUnlinkShopping) { Text(strings.unlink, color = MaterialTheme.colorScheme.error) }
                 }
-                Row(
-                    Modifier.fillMaxWidth().toggleable(
-                        value = settings.offerShopping,
-                        role = Role.Checkbox,
-                        onValueChange = { onChange(settings.copy(offerShopping = it)) },
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = settings.offerShopping, onCheckedChange = null, modifier = Modifier.padding(12.dp))
-                    Text(strings.offerShopping, style = MaterialTheme.typography.bodyLarge)
-                }
+                CheckRow(strings.offerShopping, settings.offerShopping) { onChange(settings.copy(offerShopping = it)) }
                 if (taughtPhrases != null) {
                     Text(strings.voiceCommands, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                     Text(strings.taughtPhrases(taughtPhrases), style = MaterialTheme.typography.bodyMedium)
@@ -387,6 +377,17 @@ fun SettingsDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(strings.close) } },
     )
+}
+
+@Composable
+fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null, modifier = Modifier.padding(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
 }
 
 @Composable

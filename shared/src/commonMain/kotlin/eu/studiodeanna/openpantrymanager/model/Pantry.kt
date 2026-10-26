@@ -15,8 +15,11 @@ data class PantryDocument(
     val items: List<PantryItem> = emptyList(),
 ) {
     companion object {
-        /** 2: items have the day they were bought. An older app refuses the file rather than dropping it. */
-        const val FORMAT = 2
+        /**
+         * 2: items have the day they were bought. 3: items come in boxes, opened or not. An older app
+         * refuses the file rather than dropping what it does not know.
+         */
+        const val FORMAT = 3
     }
 }
 
@@ -32,7 +35,8 @@ data class Space(
 
 /**
  * Some of one food in one space. The same food with another expiry day is another item, so each
- * batch keeps its own date. [added] is when it first went into the pantry.
+ * batch keeps its own date; so is a box of it once opened. [added] is when it first went into the
+ * pantry.
  */
 @Serializable
 data class PantryItem(
@@ -43,6 +47,13 @@ data class PantryItem(
     val expires: LocalDate? = null,
     /** The day it was bought, if known; the day it was put in the pantry, unless the user said otherwise. */
     val bought: LocalDate? = null,
+    /**
+     * It comes in boxes, packets or the like, used a little at a time: the first tap opens one, the
+     * next takes it out of the pantry.
+     */
+    val boxed: Boolean = false,
+    /** The day these boxes were opened; null while they are closed. */
+    val opened: LocalDate? = null,
     val added: Long,
     override val at: Long,
     override val by: String,
@@ -58,18 +69,26 @@ fun PantryDocument.visibleSpaces(): List<Space> =
 
 fun PantryDocument.liveItems(): List<PantryItem> = items.filterNot { it.deleted }
 
+/**
+ * How many of the food [name] the pantry has that are not opened: loose ones, and closed boxes. None
+ * left, it is time to buy more.
+ */
+fun PantryDocument.unopened(name: String): Int =
+    liveItems().filter { it.opened == null && nameKey(it.name) == nameKey(name) }.sumOf { it.quantity }
+
 fun PantryDocument.item(id: String): PantryItem? = items.firstOrNull { it.id == id && !it.deleted }
 
 fun PantryDocument.space(id: String?): Space? = spaces.firstOrNull { it.id == id && !it.deleted }
 
 /**
  * Live items by space, each space's by expiry day: the soonest first, items without a day last, and
- * by name where the day is the same. The null key holds items whose space is gone, which happens when
- * a space is deleted on one device while food is put in it on another.
+ * by name where the day is the same, an opened box before the closed ones. The null key holds items
+ * whose space is gone, which happens when a space is deleted on one device while food is put in it on
+ * another.
  */
 fun PantryDocument.itemsBySpace(): Map<String?, List<PantryItem>> {
     val live = visibleSpaces().mapTo(HashSet()) { it.id }
-    val order = compareBy<PantryItem>({ it.expires == null }, { it.expires }, { nameKey(it.name) }, { it.id })
+    val order = compareBy<PantryItem>({ it.expires == null }, { it.expires }, { nameKey(it.name) }, { it.opened == null }, { it.id })
     return liveItems().sortedWith(order).groupBy { if (it.space in live) it.space else null }
 }
 

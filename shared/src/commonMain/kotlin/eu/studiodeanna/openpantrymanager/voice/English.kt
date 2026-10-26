@@ -30,6 +30,8 @@ val English = VoiceLanguage(
         "gave me", "gave us", "given me", "given us", "was given", "were given", "been given",
     ),
     move = setOf("moved", "move", "moves", "transferred", "transfer", "shifted", "shift"),
+    // "I started a new box of cookies": opened.
+    open = setOf("opened", "open", "opens", "started", "start", "starts"),
     numbers = mapOf(
         "a" to 1, "an" to 1, "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6, "seven" to 7,
         "eight" to 8, "nine" to 9, "ten" to 10, "eleven" to 11, "twelve" to 12, "dozen" to 12, "thirteen" to 13,
@@ -87,7 +89,7 @@ val English = VoiceLanguage(
             // What else a pantry keeps.
             "detergent soap toothpaste shampoo toilet paper napkins tissues sponges bleach softener diapers"
         ).split(" ").toSet(),
-    examples = listOf("I ate an apple", "I bought six eggs", "I moved the milk to the fridge", "I finished the pasta"),
+    examples = listOf("I ate an apple", "I bought six eggs", "I moved the milk to the fridge", "I opened the cookies", "I finished the pasta"),
     spoken = setOf(
         "we're", "they're", "you're", "i've", "we've", "they've", "you've", "it's", "there's", "that's", "i'm", "i'd",
         "we'd", "i'll", "we'll",
