@@ -310,12 +310,12 @@ fun PantryScreen(
                         if (onScan != null && spaces.isNotEmpty()) {
                             IconButton(onClick = onScan) { Icon(AppIcons.Camera, contentDescription = strings.scanReceipt) }
                         }
-                        IconButton(onClick = onShopping) { Icon(AppIcons.ShoppingCart, contentDescription = strings.shoppingList) }
+                        IconButton(onClick = { query = "" }) { Icon(AppIcons.Search, contentDescription = strings.search) }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(AppIcons.MoreVert, contentDescription = strings.more) }
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                // In the menu, as in Open Check Lists, so that undo and redo fit beside the title.
-                                MenuItem(strings.search) { menu = false; query = "" }
+                                // Searching is used more, so it has the icon; with undo and redo, one more would not fit beside the title.
+                                MenuItem(strings.shoppingList) { menu = false; onShopping() }
                                 MenuItem(strings.addSpace) { menu = false; dialog = Dialog.AddSpace }
                                 if (spaces.isNotEmpty()) {
                                     MenuItem(strings.expandAll, enabled = collapsed.isNotEmpty()) {

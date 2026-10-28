@@ -46,10 +46,11 @@ class PantryScreenTest {
         runBlocking { repository.load() }
         val fridge = repository.addSpace("Frigorifero")
         repository.addItem("Latte", fridge, 2)
+        var shoppingOpened = 0
         setContent {
             CompositionLocalProvider(LocalStrings provides ItalianStrings) {
                 Box(Modifier.size(387.dp, 800.dp)) {
-                    PantryScreen(repository, SnackbarHostState(), onShopping = {}, onScan = {})
+                    PantryScreen(repository, SnackbarHostState(), onShopping = { shoppingOpened++ }, onScan = {})
                 }
             }
         }
@@ -63,6 +64,15 @@ class PantryScreenTest {
         onNodeWithText("Annullato: aggiunta di “Latte”").assertExists()
         onNodeWithContentDescription("Ripeti").assertIsEnabled().performClick()
         assertEquals(listOf("Latte"), repository.pantry.value.liveItems().map { it.name })
+
+        // The shopping list is in the menu; search has its icon, and opens the search field.
+        onNodeWithContentDescription("Altro").performClick()
+        onNodeWithText("Lista della spesa").assertExists()
+        onNodeWithText("Cerca").assertDoesNotExist()
+        onNodeWithText("Lista della spesa").performClick()
+        assertEquals(1, shoppingOpened)
+        onNodeWithContentDescription("Cerca").performClick()
+        onNodeWithText("Cerca un alimento").assertExists()
     }
 
     @Test

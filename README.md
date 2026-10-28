@@ -111,8 +111,9 @@ undone. That covers food, spaces, receipts put away and what the app learned fro
 ten edits, while the app is open. Messages about an edit also have an Undo, for that edit while it is
 the latest. An undo is an edit of its own, which syncs like any other; in a shared pantry it takes back
 only what is still as the edit left it, not what another phone has changed since. The shopping list's
-screen has its own undo and redo, for the ticks and additions made there and from the pantry. Search is
-in the menu (Ctrl+F), so that the arrows fit beside the title.
+screen has its own undo and redo, for the ticks and additions made there and from the pantry. Search has
+the magnifying glass at the top (Ctrl+F); the shopping list is in the menu, so that the arrows fit beside
+the title.
 
 **What the app learns** (`shared/.../memory/Memory.kt`), kept on the device in `memory.json`, and shared
 with the pantry when it is shared:
@@ -157,13 +158,13 @@ saving. Saving puts the food away and learns from every line. A food can go in a
 have yet: **New space** among the spaces names one there and then.
 
 **The shopping list** is a list of Open Check Lists, kept in the same file by both apps. In Open Check
-Lists, share the list through Nextcloud, copy its link, and paste it in this app (Settings, or the
-cart icon). When food runs out (see above), the app offers to put it on that list, under the name it had there
+Lists, share the list through Nextcloud, copy its link, and paste it in this app (Settings, or Menu →
+*Shopping list*). When food runs out (see above), the app offers to put it on that list, under the name it had there
 last time (which can be changed), in one of its sublists (Open Check Lists' sections), none, or a new
 one; it suggests the sublist it went on last time. Items of the list with the same or a similar name
 ("Latte" for "Latte intero", "Mele" for "Mela"), ticked or not, are offered instead: picking one puts it
 back on the list, and from then on that is the food's name there. A name already on the list, unticked,
-is not added again. The cart icon shows the list, to tick while shopping.
+is not added again. Menu → *Shopping list* shows the list, to tick while shopping.
 
 The list file is read and written exactly as Open Check Lists does: the same fields, the same
 per-item merge where the latest change wins, the same conditional writes on Nextcloud. The code for it
