@@ -70,7 +70,8 @@ private data class ReviewRow(
 /**
  * What was read on a receipt, for the user to check before anything is saved: each line's food,
  * where it goes, how many and until when. Lines the app is unsure about come first and say so; lines
- * left out before come last, left out again. Saving puts the food away and teaches the app.
+ * left out before come last, left out again. Saving ([save]) puts the food away and teaches the app.
+ * What was ticked on the shopping list is checked here too, under another [title].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +80,9 @@ fun ReceiptScreen(
     entries: List<ReceiptEntry>,
     onBack: () -> Unit,
     onSaved: (count: Int, undo: UndoStep?) -> Unit,
+    title: String = strings.receipt,
+    closeLabel: String = strings.discardReceipt,
+    save: (List<ReceiptEntry>, LocalDate?) -> Pair<UndoStep?, Int> = repository::saveReceipt,
 ) {
     val doc by repository.pantry.collectAsState()
     val spaces = remember(doc) { doc.visibleSpaces() }
@@ -118,13 +122,13 @@ fun ReceiptScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(AppIcons.Close, contentDescription = strings.discardReceipt) }
+                    IconButton(onClick = onBack) { Icon(AppIcons.Close, contentDescription = closeLabel) }
                 },
-                title = { Text(strings.receipt) },
+                title = { Text(title) },
                 actions = {
                     TextButton(
                         onClick = {
-                            val (step, count) = repository.saveReceipt(rows.map { it.entry }, bought)
+                            val (step, count) = save(rows.map { it.entry }, bought)
                             onSaved(count, step)
                         },
                         enabled = canSave,

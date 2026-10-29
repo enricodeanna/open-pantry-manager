@@ -9,6 +9,8 @@ data class Settings(
     val language: LanguageChoice = LanguageChoice.System,
     /** Whether finishing a food offers to put it on the shopping list. */
     val offerShopping: Boolean = true,
+    /** Whether the phone says, once a day, which food is to be used soon. */
+    val expiryReminders: Boolean = true,
 )
 
 @Serializable

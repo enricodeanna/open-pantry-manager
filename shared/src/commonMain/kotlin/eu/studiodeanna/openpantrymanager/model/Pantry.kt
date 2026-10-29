@@ -81,14 +81,14 @@ fun PantryDocument.item(id: String): PantryItem? = items.firstOrNull { it.id == 
 fun PantryDocument.space(id: String?): Space? = spaces.firstOrNull { it.id == id && !it.deleted }
 
 /**
- * Live items by space, each space's by expiry day: the soonest first, items without a day last, and
- * by name where the day is the same, an opened box before the closed ones. The null key holds items
- * whose space is gone, which happens when a space is deleted on one device while food is put in it on
- * another.
+ * Live items by space, each space's by the day to use them by ([useBy]: the expiry day, unless said
+ * otherwise): the soonest first, items without a day last, and by name where the day is the same, an
+ * opened box before the closed ones. The null key holds items whose space is gone, which happens when a
+ * space is deleted on one device while food is put in it on another.
  */
-fun PantryDocument.itemsBySpace(): Map<String?, List<PantryItem>> {
+fun PantryDocument.itemsBySpace(useBy: (PantryItem) -> LocalDate? = { it.expires }): Map<String?, List<PantryItem>> {
     val live = visibleSpaces().mapTo(HashSet()) { it.id }
-    val order = compareBy<PantryItem>({ it.expires == null }, { it.expires }, { nameKey(it.name) }, { it.opened == null }, { it.id })
+    val order = compareBy<PantryItem>({ useBy(it) == null }, { useBy(it) }, { nameKey(it.name) }, { it.opened == null }, { it.id })
     return liveItems().sortedWith(order).groupBy { if (it.space in live) it.space else null }
 }
 

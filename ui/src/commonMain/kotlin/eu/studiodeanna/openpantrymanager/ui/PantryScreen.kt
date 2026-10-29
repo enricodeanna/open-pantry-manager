@@ -62,6 +62,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -89,9 +91,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.studiodeanna.openpantrymanager.PantryRepository
+import eu.studiodeanna.openpantrymanager.SOON_DAYS
 import eu.studiodeanna.openpantrymanager.SyncState
 import eu.studiodeanna.openpantrymanager.Taken
 import eu.studiodeanna.openpantrymanager.UndoStep
+import eu.studiodeanna.openpantrymanager.checklist.Item
+import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.phrasesIn
 import eu.studiodeanna.openpantrymanager.model.PantryAction
 import eu.studiodeanna.openpantrymanager.model.PantryItem
@@ -100,6 +105,9 @@ import eu.studiodeanna.openpantrymanager.model.itemsBySpace
 import eu.studiodeanna.openpantrymanager.model.liveItems
 import eu.studiodeanna.openpantrymanager.model.matchesName
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
+import eu.studiodeanna.openpantrymanager.useBy
+import eu.studiodeanna.openpantrymanager.usedUpBy
+import eu.studiodeanna.openpantrymanager.useSoon
 import eu.studiodeanna.openpantrymanager.voice.VoiceCommand
 import eu.studiodeanna.openpantrymanager.voice.VoiceLanguages
 import kotlinx.coroutines.launch
@@ -114,8 +122,7 @@ private sealed interface Dialog {
     data class DeleteSpace(val space: Space) : Dialog
     data class Edit(val item: PantryItem) : Dialog
     data class Move(val item: PantryItem) : Dialog
-    /** [lastOpened]: offered because its last closed box was opened, not because it is finished. */
-    data class Shopping(val name: String, val lastOpened: Boolean = false) : Dialog
+    data class Shopping(val name: String, val why: WhyShopping = WhyShopping.Finished) : Dialog
     data object LinkShopping : Dialog
     data object SharePantry : Dialog
     data object Settings : Dialog
@@ -137,6 +144,13 @@ fun PantryScreen(
     onScan: (() -> Unit)?,
     /** Hears voice commands; null where the platform cannot. */
     voice: VoiceInput? = null,
+    /** Shows daily reminders of food to use soon; null where the platform cannot. */
+    reminders: Reminders? = null,
+    /** Reviews the shopping list's items just bought, to put them in the pantry. */
+    onPutAway: (List<Item>) -> Unit = {},
+    /** Where the app was opened to go: searching, or listening; [onShortcut] says it went. */
+    shortcut: Shortcut? = null,
+    onShortcut: () -> Unit = {},
 ) {
     val doc by repository.pantry.collectAsState()
     val settings by repository.settings.collectAsState()
@@ -144,7 +158,6 @@ fun PantryScreen(
     val shopping by repository.shopping.collectAsState()
     val sharing by repository.sharing.collectAsState()
     val undoState by repository.undoState.collectAsState()
-    val memory by repository.memory.collectAsState()
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<Dialog?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -154,7 +167,9 @@ fun PantryScreen(
     val texts = strings
 
     val spaces = remember(doc) { doc.visibleSpaces() }
-    val grouped = remember(doc) { doc.itemsBySpace() }
+    val memory by repository.memory.collectAsState()
+    // An opened box that will not last to its expiry day comes up by when it usually is used up.
+    val grouped = remember(doc, memory) { doc.itemsBySpace { memory.useBy(it) } }
 
     /** Says what was done, with Undo; a new message replaces the one showing. */
     fun announce(message: String, step: UndoStep?) {
@@ -188,7 +203,7 @@ fun PantryScreen(
 
     /** Offers to put [name] on the shopping list: none of it is left unopened. */
     fun ranOut(name: String, lastOpened: Boolean = false) {
-        if (settings.offerShopping) dialog = Dialog.Shopping(name, lastOpened)
+        if (settings.offerShopping) dialog = Dialog.Shopping(name, if (lastOpened) WhyShopping.LastOpened else WhyShopping.Finished)
     }
 
     /** Says what taking some of [item] did, with Undo, and offers the shopping list if none is left unopened. */
@@ -252,6 +267,20 @@ fun PantryScreen(
     }
 
     fun useOne(item: PantryItem) = took(item, repository.useOne(item.id))
+
+    // Opened from a shortcut of the launcher icon.
+    LaunchedEffect(shortcut) {
+        when (shortcut) {
+            Shortcut.Search -> query = ""
+            Shortcut.Voice -> if (voice != null && voiceLanguage != null) dialog = Dialog.Voice
+            Shortcut.Receipt, null -> return@LaunchedEffect
+        }
+        onShortcut()
+    }
+
+    // Just bought: ticked on the shopping list, here or in Open Check Lists, and not put away yet.
+    val bought = remember(shopping, memory) { repository.boughtOnList() }
+    val soon = remember(doc, memory, today) { doc.useSoon(memory, today) }
 
     // While searching, Back closes the search rather than the app.
     BackHandler(enabled = query != null) { query = null }
@@ -389,13 +418,26 @@ fun PantryScreen(
                 }
                 val q = query
                 if (q != null) {
-                    searchResults(spaces, grouped, q, today, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }) {
-                        dialog = Dialog.Move(it)
+                    searchResults(spaces, grouped, q, today, memory, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }, onMove = { dialog = Dialog.Move(it) })
+                    if (q.isNotBlank() && spaces.none { space -> grouped[space.id].orEmpty().any { matchesName(it.name, q) } }) {
+                        // Not in the pantry: put it there, or on the shopping list, as the app knows it.
+                        val name = repository.food(q)?.name ?: q.trim().replaceFirstChar { it.uppercase() }
+                        item(key = "not-found") {
+                            NotFound(
+                                query = q,
+                                name = name,
+                                onAdd = { dialog = Dialog.AddFood(null, name) },
+                                onShoppingList = { dialog = Dialog.Shopping(name, WhyShopping.Searched) },
+                            )
+                        }
                     }
                     return@LazyColumn
                 }
-                val soon = doc.liveItems().filter { item -> item.expires?.let { today.daysUntil(it) <= SOON_DAYS } == true }
-                    .sortedBy { it.expires }
+                if (bought.isNotEmpty()) {
+                    item(key = "bought") {
+                        BoughtCard(bought.size, onPutAway = { onPutAway(bought) }, onIgnore = { repository.letGoFromList(bought) })
+                    }
+                }
                 if (soon.isNotEmpty()) {
                     item(key = "soon") {
                         UseSoonCard(soon, spaces, today) { dialog = Dialog.Edit(it) }
@@ -427,7 +469,7 @@ fun PantryScreen(
                         )
                     }
                     if (!folded) {
-                        itemRows(items, today, SECTION_INDENT, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }) {
+                        itemRows(items, today, memory, SECTION_INDENT, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }) {
                             dialog = Dialog.Move(it)
                         }
                         if (id != null) {
@@ -514,7 +556,7 @@ fun PantryScreen(
         }
         is Dialog.Shopping -> ShoppingPromptDialog(
             name = d.name,
-            lastOpened = d.lastOpened,
+            why = d.why,
             shopping = shopping,
             suggested = repository.sublistFor(d.name),
             similar = repository::similarOnList,
@@ -578,6 +620,7 @@ fun PantryScreen(
             onStopSharing = { scope.launch { repository.stopSharingPantry() } },
             onSyncNow = { repository.syncNow() },
             taughtPhrases = taughtPhrases?.size,
+            reminders = reminders,
             onTaughtPhrases = { dialog = Dialog.TaughtPhrases },
             onDismiss = { dialog = null },
         )
@@ -617,9 +660,12 @@ private fun FirstSpaces(onAdd: (String) -> Unit, onOther: () -> Unit, onShare: (
     }
 }
 
-/** Food that expires within [SOON_DAYS] days or already has, soonest first. */
+/**
+ * Food to use within [SOON_DAYS] days or already past its day, soonest first: by its expiry day, or, for
+ * an opened box, by how long that food usually lasts opened.
+ */
 @Composable
-private fun UseSoonCard(items: List<PantryItem>, spaces: List<Space>, today: LocalDate, onEdit: (PantryItem) -> Unit) {
+private fun UseSoonCard(items: List<Pair<PantryItem, LocalDate>>, spaces: List<Space>, today: LocalDate, onEdit: (PantryItem) -> Unit) {
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
@@ -634,7 +680,7 @@ private fun UseSoonCard(items: List<PantryItem>, spaces: List<Space>, today: Loc
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
-            items.forEach { item ->
+            items.forEach { (item, useBy) ->
                 Row(
                     Modifier.fillMaxWidth().clickable { onEdit(item) }.padding(horizontal = 16.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -647,10 +693,50 @@ private fun UseSoonCard(items: List<PantryItem>, spaces: List<Space>, today: Loc
                             color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f),
                         )
                     }
-                    val expires = item.expires ?: return@Row
-                    Text(strings.expiry(expires, today), style = MaterialTheme.typography.labelLarge, color = expiryColor(expires, today))
+                    Text(strings.useByText(item, useBy, today), style = MaterialTheme.typography.labelLarge, color = expiryColor(useBy, today))
                 }
             }
+        }
+    }
+}
+
+/** Items ticked on the shopping list and not put away yet: put them in the pantry, after a look, or let them go. */
+@Composable
+private fun BoughtCard(count: Int, onPutAway: () -> Unit, onIgnore: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(AppIcons.ShoppingCart, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(18.dp))
+                Text(
+                    strings.boughtOnList(count),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onIgnore) { Text(strings.ignore) }
+                TextButton(onClick = onPutAway) { Text(strings.putThemAway, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+    }
+}
+
+/** A search that found nothing: the food can be added to the pantry, or put on the shopping list. */
+@Composable
+private fun NotFound(query: String, name: String, onAdd: () -> Unit, onShoppingList: () -> Unit) {
+    Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(strings.noFoodMatches(query), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = onAdd) {
+            Icon(AppIcons.Add, contentDescription = null)
+            Text(strings.addNamedToPantry(name), Modifier.padding(start = 8.dp))
+        }
+        OutlinedButton(onClick = onShoppingList) {
+            Icon(AppIcons.ShoppingCart, contentDescription = null)
+            Text(strings.putNamedOnList(name), Modifier.padding(start = 8.dp))
         }
     }
 }
@@ -658,13 +744,14 @@ private fun UseSoonCard(items: List<PantryItem>, spaces: List<Space>, today: Loc
 private fun LazyListScope.itemRows(
     items: List<PantryItem>,
     today: LocalDate,
+    memory: Memory,
     indent: Dp,
     onUse: (PantryItem) -> Unit,
     onEdit: (PantryItem) -> Unit,
     onMove: (PantryItem) -> Unit,
 ) {
     items(items, key = { it.id }) { item ->
-        ItemRow(item, today, indent, onUse = { onUse(item) }, onEdit = { onEdit(item) }, onMove = { onMove(item) })
+        ItemRow(item, today, memory.usedUpBy(item), indent, onUse = { onUse(item) }, onEdit = { onEdit(item) }, onMove = { onMove(item) })
     }
 }
 
@@ -674,15 +761,14 @@ private fun LazyListScope.searchResults(
     grouped: Map<String?, List<PantryItem>>,
     query: String,
     today: LocalDate,
+    memory: Memory,
     onUse: (PantryItem) -> Unit,
     onEdit: (PantryItem) -> Unit,
     onMove: (PantryItem) -> Unit,
 ) {
-    var any = false
     for (space in spaces) {
         val found = grouped[space.id].orEmpty().filter { matchesName(it.name, query) }
         if (found.isEmpty()) continue
-        any = true
         item(key = "found-${space.id}") {
             Text(
                 space.name,
@@ -691,22 +777,21 @@ private fun LazyListScope.searchResults(
                 modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
             )
         }
-        itemRows(found, today, 0.dp, onUse, onEdit, onMove)
-    }
-    if (!any && query.isNotBlank()) {
-        item(key = "none") {
-            Text(
-                strings.noFoodMatches(query),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(24.dp),
-            )
-        }
+        itemRows(found, today, memory, 0.dp, onUse, onEdit, onMove)
     }
 }
 
 @Composable
-private fun ItemRow(item: PantryItem, today: LocalDate, indent: Dp, onUse: () -> Unit, onEdit: () -> Unit, onMove: () -> Unit) {
+private fun ItemRow(
+    item: PantryItem,
+    today: LocalDate,
+    /** For an opened box, the day that food usually is used up by, if known. */
+    usedUpBy: LocalDate?,
+    indent: Dp,
+    onUse: () -> Unit,
+    onEdit: () -> Unit,
+    onMove: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(start = 4.dp + indent),
         verticalAlignment = Alignment.CenterVertically,
@@ -714,14 +799,18 @@ private fun ItemRow(item: PantryItem, today: LocalDate, indent: Dp, onUse: () ->
         CountBadge(item, onUse)
         Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
             Text(item.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val opened = item.opened?.let { strings.openedAgo(it.daysUntil(today)) }
+            val opened = item.opened?.let { day ->
+                val lasts = usedUpBy?.let { " (" + strings.usuallyLasts(day.daysUntil(it)) + ")" }.orEmpty()
+                strings.openedAgo(day.daysUntil(today)) + lasts
+            }
             val expiry = item.expires?.let { strings.expiry(it, today) }
             if (opened != null || expiry != null) {
                 val variant = MaterialTheme.colorScheme.onSurfaceVariant
                 val expiryColor = item.expires?.let { expiryColor(it, today) } ?: variant
+                val openedColor = usedUpBy?.let { expiryColor(it, today) } ?: variant
                 Text(
                     buildAnnotatedString {
-                        opened?.let { withStyle(SpanStyle(color = variant)) { append(it) } }
+                        opened?.let { withStyle(SpanStyle(color = openedColor)) { append(it) } }
                         if (opened != null && expiry != null) withStyle(SpanStyle(color = variant)) { append(" · ") }
                         expiry?.let { text ->
                             withStyle(SpanStyle(color = expiryColor)) { append(if (opened != null) text.replaceFirstChar { it.lowercase() } else text) }
@@ -749,11 +838,16 @@ private fun CountBadge(item: PantryItem, onClick: () -> Unit) {
     }
     val colors = MaterialTheme.colorScheme
     val opened = item.opened != null
+    val haptics = LocalHapticFeedback.current
     Box(
         Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .clickable(onClickLabel = description, role = Role.Button, onClick = onClick)
+            .clickable(onClickLabel = description, role = Role.Button) {
+                // Felt as well as seen: the tap took one.
+                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                onClick()
+            }
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {

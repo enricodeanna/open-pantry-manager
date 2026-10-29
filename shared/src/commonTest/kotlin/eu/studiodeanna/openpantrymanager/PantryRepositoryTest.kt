@@ -18,17 +18,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 
 class PantryRepositoryTest {
     private val files = MemoryFileStore()
     private var clock = 1_000_000L
 
     private fun TestScope.repository(http: io.ktor.client.HttpClient = FakeNextcloud().http) =
-        PantryRepository(files, this, http, now = { clock++ }, date = { LocalDate(2026, 10, 14) })
+        PantryRepository(files, this, http, now = { clock++ }, date = { LocalDate(2026, 10, 14) }, work = StandardTestDispatcher(testScheduler))
 
     /** A list as Open Check Lists writes it: a title, two sections, items in and outside them. */
     private val openCheckListsFile = """
@@ -316,5 +319,72 @@ class PantryRepositoryTest {
         repo.editItem(muesli.id, "Muesli", 1, null, cabinet, boxed = false)
         assertEquals(false to null, repo.pantry.value.item(muesli.id)!!.let { it.boxed to it.opened })
         assertEquals(false, repo.food("Muesli")?.boxed)
+    }
+
+    @Test
+    fun whatWasTickedOnTheListIsPutAwayOnceAndUndoneTogether() = runTest {
+        val cloud = FakeNextcloud(folder = true)
+        cloud.overwrite(openCheckListsFile, "Groceries.json")
+        val repo = repository(cloud.http)
+        repo.load()
+        repo.linkShoppingList(cloud.link)
+        val fridge = repo.addSpace("Fridge")
+        repo.addItem("Milk, semi-skimmed", fridge, 1, LocalDate(2026, 10, 21))
+
+        // Milk was ticked: let go, it is not offered again until ticked anew.
+        assertEquals(listOf("item00000001"), repo.boughtOnList().map { it.id })
+        repo.letGoFromList(repo.boughtOnList())
+        assertEquals(emptyList(), repo.boughtOnList())
+        repo.useShoppingItem("Milk, semi-skimmed", "item00000001")
+        repo.setShoppingDone("item00000001", true)
+        repo.setShoppingDone("item00000002", true)
+        val bought = repo.boughtOnList()
+        assertEquals(listOf("Milk", "Bread"), bought.map { it.text })
+
+        // Milk is the food it went on the list for, with its place and its usual keeping time; Bread is new.
+        val entries = repo.entriesFor(bought)
+        assertEquals(
+            listOf(Triple("Milk, semi-skimmed", fridge, LocalDate(2026, 10, 21)), Triple("Bread", null, null)),
+            entries.map { Triple(it.name, it.space, it.expires) },
+        )
+        assertEquals("Milk", entries.first().line.text)
+        val (step, count) = repo.putAwayFromList(entries.map { if (it.space == null) it.copy(space = fridge) else it }, bought)
+        assertEquals(2, count)
+        assertEquals(mapOf("Milk, semi-skimmed" to 2, "Bread" to 1), repo.pantry.value.liveItems().associate { it.name to it.quantity })
+        assertEquals(emptyList(), repo.boughtOnList())
+
+        // Undone, the food leaves the pantry and the items are offered again.
+        assertEquals(PantryAction.PutAwayFromList(2), repo.undo(step!!))
+        assertEquals(listOf("Milk", "Bread"), repo.boughtOnList().map { it.text })
+        assertEquals(1, repo.pantry.value.liveItems().single().quantity)
+    }
+
+    @Test
+    fun learnsHowLongAnOpenedBoxLastsAndPointsItOutBeforeThen() = runTest {
+        var day = LocalDate(2026, 10, 1)
+        val repo = PantryRepository(files, this, FakeNextcloud().http, now = { clock++ }, date = { day }, work = StandardTestDispatcher(testScheduler))
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        repeat(2) {
+            repo.addItem("Milk", fridge, boxed = true)
+            val milk = repo.pantry.value.liveItems().single()
+            repo.useOne(milk.id)
+            day = day.plus(DatePeriod(days = 4))
+            repo.useOne(milk.id)
+        }
+        assertEquals(listOf(4, 4), repo.food("Milk")?.openLasts)
+
+        repo.addItem("Milk", fridge, boxed = true)
+        val milk = repo.pantry.value.liveItems().single()
+        repo.useOne(milk.id)
+        val opened = repo.pantry.value.item(milk.id)!!
+        val usedUp = day.plus(DatePeriod(days = 4))
+        assertEquals(usedUp, repo.memory.value.usedUpBy(opened))
+        // Four days away is not soon yet; the day after, it is, though it has no expiry day.
+        assertEquals(emptyList(), repo.pantry.value.useSoon(repo.memory.value, day))
+        assertEquals(listOf(opened to usedUp), repo.pantry.value.useSoon(repo.memory.value, day.plus(DatePeriod(days = 1))))
+        // Its expiry day counts when it comes first.
+        repo.editItem(milk.id, "Milk", 1, day.plus(DatePeriod(days = 2)), fridge)
+        assertEquals(day.plus(DatePeriod(days = 2)), repo.memory.value.useBy(repo.pantry.value.item(milk.id)!!))
     }
 }

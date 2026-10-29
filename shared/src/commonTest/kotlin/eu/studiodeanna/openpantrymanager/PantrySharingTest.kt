@@ -12,6 +12,7 @@ import eu.studiodeanna.openpantrymanager.sync.SharedPantryCodec
 import eu.studiodeanna.openpantrymanager.voice.Italian
 import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 import eu.studiodeanna.openpantrymanager.voice.VoiceCommand
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
@@ -30,7 +31,7 @@ class PantrySharingTest {
     private val cloud = FakeNextcloud(folder = true)
 
     private suspend fun TestScope.phone(files: MemoryFileStore = MemoryFileStore(), http: io.ktor.client.HttpClient = cloud.http) =
-        PantryRepository(files, this, http, now = { clock++ }, date = { LocalDate(2026, 10, 14) }).also { it.load() }
+        PantryRepository(files, this, http, now = { clock++ }, date = { LocalDate(2026, 10, 14) }, work = StandardTestDispatcher(testScheduler)).also { it.load() }
 
     private fun PantryRepository.names() = pantry.value.liveItems().map { it.name }.sorted()
 

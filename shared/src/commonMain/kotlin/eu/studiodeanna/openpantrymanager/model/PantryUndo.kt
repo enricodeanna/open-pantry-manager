@@ -26,6 +26,7 @@ sealed interface PantryAction {
     data class EditedFood(val name: String) : PantryAction
     data class MovedFood(val name: String) : PantryAction
     data class PutAway(val count: Int) : PantryAction
+    data class PutAwayFromList(val count: Int) : PantryAction
     data class AddedSpace(val name: String) : PantryAction
     data class RenamedSpace(val name: String) : PantryAction
     data class MovedSpace(val name: String) : PantryAction

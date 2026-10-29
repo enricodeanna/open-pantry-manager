@@ -19,28 +19,31 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.intl.Locale
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import eu.studiodeanna.openpantrymanager.Messages
 import eu.studiodeanna.openpantrymanager.PantryRepository
+import eu.studiodeanna.openpantrymanager.checklist.Item
 import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
-import eu.studiodeanna.openpantrymanager.store.LanguageChoice
 import kotlinx.coroutines.launch
 
 /**
- * The whole app. [scanner] reads receipts and [voice] hears voice commands where the platform can;
- * without them, scanning and voice commands are not offered.
+ * The whole app. [scanner] reads receipts, [voice] hears voice commands and [reminders] shows daily
+ * reminders where the platform can; without them, these are not offered. [shortcut] is where the app was
+ * just opened to go, from outside it; [onShortcut] says it went there.
  */
 @Composable
-fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null, voice: VoiceInput? = null) {
+fun PantryApp(
+    repository: PantryRepository,
+    scanner: ReceiptScanner? = null,
+    voice: VoiceInput? = null,
+    reminders: Reminders? = null,
+    shortcut: Shortcut? = null,
+    onShortcut: () -> Unit = {},
+) {
     val settings by repository.settings.collectAsState()
-    val strings = when (settings.language) {
-        LanguageChoice.English -> EnglishStrings
-        LanguageChoice.Italian -> ItalianStrings
-        LanguageChoice.System -> if (Locale.current.language == "it") ItalianStrings else EnglishStrings
-    }
+    val strings = stringsFor(settings.language)
     SideEffect { Messages.current = strings.messages }
     PantryTheme(darkTheme = settings.theme.isDark()) {
         CompositionLocalProvider(LocalStrings provides strings) {
@@ -61,6 +64,17 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null, voi
                 // Shared by the screens, so a message from one (receipt saved) shows on the next.
                 val snackbars = remember { SnackbarHostState() }
                 var receipt by remember { mutableStateOf<List<ReceiptEntry>?>(null) }
+                /** The shopping list's items under review, when [receipt] was made of them rather than read on a receipt. */
+                var fromList by remember { mutableStateOf<List<Item>?>(null) }
+                // Opened from a shortcut: back to the pantry, which searches or listens; or on to the camera.
+                LaunchedEffect(shortcut) {
+                    if (shortcut == null) return@LaunchedEffect
+                    nav.popBackStack("pantry", inclusive = false)
+                    if (shortcut == Shortcut.Receipt) {
+                        if (scanner != null) nav.navigate("photos")
+                        onShortcut()
+                    }
+                }
                 NavHost(nav, startDestination = "pantry") {
                     composable("pantry") {
                         PantryScreen(
@@ -69,6 +83,14 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null, voi
                             onShopping = { nav.navigate("shopping") },
                             onScan = scanner?.let { { nav.navigate("photos") } },
                             voice = voice,
+                            reminders = reminders,
+                            onPutAway = { items ->
+                                fromList = items
+                                receipt = repository.entriesFor(items)
+                                nav.navigate("receipt")
+                            },
+                            shortcut = shortcut?.takeIf { it != Shortcut.Receipt },
+                            onShortcut = onShortcut,
                         )
                     }
                     composable("photos") {
@@ -80,6 +102,7 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null, voi
                             onBack = { nav.popBackStack() },
                             onRead = {
                                 receipt = it
+                                fromList = null
                                 // Back from the review goes to the pantry: the photos are done with.
                                 nav.navigate("receipt") { popUpTo("photos") { inclusive = true } }
                             },
@@ -95,12 +118,16 @@ fun PantryApp(repository: PantryRepository, scanner: ReceiptScanner? = null, voi
                             LaunchedEffect(Unit) { nav.popBackStack() }
                             return@composable
                         }
+                        val items = fromList
                         ReceiptScreen(
                             repository,
                             entries,
                             // The entries stay until the next scan replaces them: clearing them here would
                             // make this screen leave a second time, taking the pantry with it.
                             onBack = { nav.popBackStack() },
+                            title = if (items != null) strings.putAwayTitle else strings.receipt,
+                            closeLabel = if (items != null) strings.close else strings.discardReceipt,
+                            save = if (items != null) { e, bought -> repository.putAwayFromList(e, items, bought) } else repository::saveReceipt,
                             onSaved = { count, step ->
                                 nav.popBackStack()
                                 scope.launch {

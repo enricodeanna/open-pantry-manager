@@ -38,10 +38,11 @@ data class SharedPantry(
         const val KIND = "open-pantry-manager"
         /**
          * 2: items have the day they were bought. 3: the memory has phrases taught to voice commands. 4:
-         * items come in boxes, opened or not. An older app refuses the file rather than dropping what it
-         * does not know.
+         * items come in boxes, opened or not. 5: the memory has how long opened boxes last, and which
+         * items of the shopping list were put away. An older app refuses the file rather than dropping
+         * what it does not know.
          */
-        const val FORMAT = 4
+        const val FORMAT = 5
         const val EXTENSION = ".pantry"
     }
 }

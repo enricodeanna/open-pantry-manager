@@ -3,15 +3,14 @@ package eu.studiodeanna.openpantrymanager.ui
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import eu.studiodeanna.openpantrymanager.SOON_DAYS
+import eu.studiodeanna.openpantrymanager.model.PantryItem
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Instant
-
-/** Food expiring within this many days is pointed out. */
-const val SOON_DAYS = 3
 
 /** "21 Oct", with the year when it is not [today]'s. */
 fun Strings.shortDate(date: LocalDate, today: LocalDate): String {
@@ -27,6 +26,15 @@ fun Strings.expiry(date: LocalDate, today: LocalDate): String {
         days <= 7 -> expiresIn(days)
         else -> expiresOn(shortDate(date, today))
     }
+}
+
+/**
+ * Why food is to be used by [useBy] (see [eu.studiodeanna.openpantrymanager.useBy]): its expiry day, or,
+ * for an opened box that will not last that long, since when it is open.
+ */
+fun Strings.useByText(item: PantryItem, useBy: LocalDate, today: LocalDate): String {
+    val opened = item.opened
+    return if (opened != null && useBy != item.expires) openedAgo(opened.daysUntil(today)) else expiry(useBy, today)
 }
 
 /** The colour an expiry is shown in: the error colour once past, the warning colour when soon. */

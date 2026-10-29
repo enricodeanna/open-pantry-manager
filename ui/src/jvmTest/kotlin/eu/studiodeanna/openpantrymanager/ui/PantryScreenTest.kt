@@ -8,6 +8,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.filterToOne
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -17,6 +21,13 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import eu.studiodeanna.openpantrymanager.PantryRepository
+import eu.studiodeanna.openpantrymanager.checklist.Item
+import eu.studiodeanna.openpantrymanager.checklist.ListCodec
+import eu.studiodeanna.openpantrymanager.checklist.ListDocument
+import eu.studiodeanna.openpantrymanager.currentTimeMillis
+import eu.studiodeanna.openpantrymanager.store.DeviceState
+import eu.studiodeanna.openpantrymanager.sync.ShareLink
+import kotlinx.serialization.json.Json
 import eu.studiodeanna.openpantrymanager.model.liveItems
 import eu.studiodeanna.openpantrymanager.store.FileStore
 import kotlinx.coroutines.CoroutineScope
@@ -98,5 +109,64 @@ class PantryScreenTest {
         onNodeWithContentDescription("Apri una confezione: Biscotti").performClick()
         onNodeWithText("Aperta l'ultima confezione: Biscotti").assertExists()
         assertEquals(0, repository.pantry.value.liveItems().count { it.opened == null })
+    }
+
+    @Test
+    fun aSearchThatFindsNothingOffersToAddTheFoodOrPutItOnTheList() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        val fridge = repository.addSpace("Frigorifero")
+        repository.addItem("Latte", fridge)
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) {
+                    PantryScreen(repository, SnackbarHostState(), onShopping = {}, onScan = {})
+                }
+            }
+        }
+        onNodeWithContentDescription("Cerca").performClick()
+        onNode(hasSetTextAction()).performTextInput("burro")
+        onNodeWithText("Nessun alimento si chiama “burro”.").assertExists()
+        onNodeWithText("Metti “Burro” nella lista della spesa").assertExists()
+        onNodeWithText("Aggiungi “Burro” alla dispensa").performClick()
+        onNodeWithText("Aggiungi alimento").assertExists()
+        onAllNodes(hasSetTextAction()).filterToOne(hasText("Burro")).assertExists()
+    }
+
+    @Test
+    fun whatWasTickedOnTheShoppingListIsOfferedToPutAway() = runComposeUiTest {
+        // A shopping list linked before, with milk ticked just now and bread long ago.
+        val store = MemoryStore()
+        val now = currentTimeMillis()
+        store.files["device.json"] = Json.encodeToString(
+            DeviceState.serializer(),
+            DeviceState("phone001", shoppingLink = ShareLink("https://cloud.example.com/s/AbC123", fileName = "Spesa.json")),
+        )
+        store.files["shopping-list.json"] = ListCodec.encode(
+            ListDocument(
+                title = "Spesa",
+                items = listOf(
+                    Item("milk", "Latte", done = true, pos = 1.0, at = now, by = "other"),
+                    Item("bread", "Pane", done = true, pos = 2.0, at = now - 10L * 24 * 60 * 60 * 1000, by = "other"),
+                ),
+            ),
+        )
+        val repository = PantryRepository(store, CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        repository.addSpace("Frigorifero")
+        var putAway: List<Item>? = null
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) {
+                    PantryScreen(repository, SnackbarHostState(), onShopping = {}, onScan = {}, onPutAway = { putAway = it })
+                }
+            }
+        }
+        onNodeWithText("Hai spuntato 1 prodotto nella lista della spesa.").assertExists()
+        onNodeWithText("Mettili in dispensa").performClick()
+        assertEquals(listOf("milk"), putAway?.map { it.id })
+        onNodeWithText("Ignora").performClick()
+        onNodeWithText("Hai spuntato 1 prodotto nella lista della spesa.").assertDoesNotExist()
+        assertEquals(emptyList(), repository.boughtOnList())
     }
 }

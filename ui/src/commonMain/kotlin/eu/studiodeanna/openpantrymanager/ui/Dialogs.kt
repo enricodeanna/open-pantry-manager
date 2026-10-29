@@ -37,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +59,7 @@ import eu.studiodeanna.openpantrymanager.store.LanguageChoice
 import eu.studiodeanna.openpantrymanager.store.Settings
 import eu.studiodeanna.openpantrymanager.store.ThemeChoice
 import eu.studiodeanna.openpantrymanager.sync.ShareLinks
+import kotlinx.coroutines.launch
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.plus
@@ -313,8 +315,13 @@ fun SettingsDialog(
     /** How many phrases were taught to voice commands; null where there are none. */
     taughtPhrases: Int?,
     onTaughtPhrases: () -> Unit,
+    /** Daily reminders of food to use soon; null where the platform has none. */
+    reminders: Reminders? = null,
     onDismiss: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    // Checked when wanted and allowed: turned off in the system's settings, it shows off here too.
+    var remindersAllowed by remember { mutableStateOf(reminders?.allowed() == true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.settings) },
@@ -349,6 +356,18 @@ fun SettingsDialog(
                     TextButton(onClick = onUnlinkShopping) { Text(strings.unlink, color = MaterialTheme.colorScheme.error) }
                 }
                 CheckRow(strings.offerShopping, settings.offerShopping) { onChange(settings.copy(offerShopping = it)) }
+                if (reminders != null) {
+                    CheckRow(strings.expiryReminders, settings.expiryReminders && remindersAllowed) { on ->
+                        if (!on) {
+                            onChange(settings.copy(expiryReminders = false))
+                        } else {
+                            scope.launch {
+                                remindersAllowed = reminders.allow()
+                                if (remindersAllowed) onChange(settings.copy(expiryReminders = true))
+                            }
+                        }
+                    }
+                }
                 if (taughtPhrases != null) {
                     Text(strings.voiceCommands, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
                     Text(strings.taughtPhrases(taughtPhrases), style = MaterialTheme.typography.bodyMedium)

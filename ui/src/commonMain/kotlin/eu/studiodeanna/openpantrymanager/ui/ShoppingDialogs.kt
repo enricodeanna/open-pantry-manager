@@ -44,6 +44,9 @@ import eu.studiodeanna.openpantrymanager.sync.SharePasswordRequired
 import eu.studiodeanna.openpantrymanager.sync.SharedList
 import kotlinx.coroutines.launch
 
+/** Why a food is offered for the shopping list. */
+enum class WhyShopping { Finished, LastOpened, Searched }
+
 /**
  * Asks whether to put [name] on the shopping list, as what ([initialText], editable), and in which
  * sublist: the ones the list has, none, or a new one; [suggested] is where it went last time. Items
@@ -59,8 +62,8 @@ fun ShoppingPromptDialog(
     similar: (String) -> List<Item>,
     initialText: String = name,
     askName: Boolean = false,
-    /** It comes up because the last closed box of [name] was opened, not because it is finished. */
-    lastOpened: Boolean = false,
+    /** Why it comes up: [name] is finished, its last closed box opened, or the user asked from a search. */
+    why: WhyShopping = WhyShopping.Finished,
     onDismiss: () -> Unit,
     onLink: () -> Unit,
     onAdd: (text: String, sublist: Sublist) -> Unit,
@@ -69,8 +72,16 @@ fun ShoppingPromptDialog(
     if (shopping == null) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(if (lastOpened) strings.lastOpenedTitle(name) else strings.finishedTitle(name)) },
-            text = { Text(strings.linkToAddFinished) },
+            title = {
+                Text(
+                    when (why) {
+                        WhyShopping.Finished -> strings.finishedTitle(name)
+                        WhyShopping.LastOpened -> strings.lastOpenedTitle(name)
+                        WhyShopping.Searched -> strings.noShoppingListTitle
+                    },
+                )
+            },
+            text = { Text(if (why == WhyShopping.Searched) strings.noShoppingListHelp else strings.linkToAddFinished) },
             confirmButton = { TextButton(onClick = onLink) { Text(strings.linkShoppingList) } },
             dismissButton = { TextButton(onClick = onDismiss) { Text(strings.notNow) } },
         )

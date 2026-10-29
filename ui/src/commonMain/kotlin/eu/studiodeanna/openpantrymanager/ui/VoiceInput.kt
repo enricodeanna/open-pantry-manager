@@ -20,7 +20,7 @@ interface VoiceInput {
      */
     suspend fun listen(language: VoiceLanguage, words: List<String>, partial: (String) -> Unit): List<String>?
 
-    /** Stops listening, and frees the memory the recognizer takes. */
+    /** Stops listening; the memory the recognizer takes is freed, at once or a little later. */
     fun finish()
 }
 

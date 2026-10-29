@@ -36,10 +36,11 @@ build serves Google Play and F-Droid.
 **Spaces and food.** The pantry shows each space as a section that folds, as Open Check Lists shows
 sections. Food has a name, a quantity, and optionally an expiry day and the day it was bought (today,
 unless you say otherwise, or not known); the same food with the same expiry day in the same space is
-counted rather than listed twice, keeping the earlier day of purchase. Each space lists its food by
-expiry day, the soonest first, food without a day last. Each row starts with how many there are: tapping
-the number means one was used, the count goes down, and the last one takes the food out of the pantry.
-Food expiring within three days, or already expired, is listed under **Use soon** at the top.
+counted rather than listed twice, keeping the earlier day of purchase. Each space lists its food by the
+day to use it by, the soonest first, food without a day last. Each row starts with how many there are:
+tapping the number means one was used (the phone gives a short tick), the count goes down, and the last
+one takes the food out of the pantry. Food to use within three days, or already past its day, is listed
+under **Use soon** at the top.
 
 **Boxes.** Food used a little at a time (cookies, cereals, coffee) can be marked *Comes in a box or
 packet* when it is added or edited; the app remembers it for that food, from receipts too. Its number
@@ -48,17 +49,37 @@ with the same name and expiry, a square without its lid, and "Opened today", "Op
 name, before the closed ones. The next tap on it means it is finished. Boxes of a food opened the same day
 in the same space are counted together. The edit dialog can mark a box opened or closed again.
 
+The app learns how long an opened box of each food lasts, from the day it was opened to the day it was
+finished. Once a food has been finished from an opened box twice, its opened box says "Aperto da 3
+giorni (di solito dura 4 giorni)", is listed by that day rather than its expiry day when that comes
+first, and goes under *Use soon* (and in the reminder) as that day nears.
+
 **Running out.** Food goes on the shopping list (if one is linked, and the setting is on) when none of it
 is left unopened: when the last one is finished, and for boxes when the last closed one is opened, not
 when that box is finished later. Finishing food while the pantry still has some of the same name, with
 another expiry day or none, asks nothing.
+
+**Searching.** The magnifying glass at the top (Ctrl+F) searches the food of every space, folded or not;
+the rows found work as in their spaces. When nothing matches, the search offers to add the food to the
+pantry (the *Add food* dialog, filled in) or to put it on the shopping list, under the name the app knows
+it by.
+
+**Shortcuts.** A long press on the app's icon offers *Search*, *Voice* (in languages with voice commands)
+and *Receipt*, which open the app searching, listening, or on the receipt's photos. They are in the app's
+language.
+
+**Reminders.** Once a day, between 9 and 10 in the morning, the phone lists the food to use within three days, or since
+yesterday past its day, in one notification; nothing is shown when there is none. It is made on the phone
+from the pantry, with no network. *Settings → Remind me once a day of food to use soon* turns it off;
+Android 13 and later asks once for leave to show notifications.
 
 **Voice commands.** The microphone button above *Add food* listens to one sentence, on the phone, and does
 what it says, with Undo in the message that follows:
 
 - "ho mangiato una mela", "ho consumato due confezioni di passata", "I drank a bottle of water": that
   many are used (one, unless said); of food of the same name, the one expiring first;
-- "ho finito il latte", "I ran out of milk": finished, and offered for the shopping list;
+- "ho finito il latte", "I ran out of milk": finished, and offered for the shopping list (see *Running
+  out*);
 - "ho aperto i biscotti", "ho iniziato un pacco di biscotti", "I opened the cookies": a closed box opened.
   Food in boxes is used as a tap uses it: "ho mangiato i biscotti" opens a closed box when none is open,
   and finishes the open one when there is one; "finito" takes the open box first; a number said ("due
@@ -103,7 +124,9 @@ numbers how many, prepositions where to and from, and the food is matched as the
 suggestions are, with plurals ("mela", "mele"). Each language's model, a small Vosk model of 40–50 MB, is
 downloaded once, when the microphone is first used in that language, from alphacephei.com, and checked
 against its SHA-256; after that nothing said leaves the phone. Voice commands are offered in the language
-the app is shown in.
+the app is shown in. The model is loaded when the dialog first listens and kept for three minutes after
+it closes, so that a second command starts at once; it is let go then, or as soon as the app leaves the
+screen.
 
 **Undo and redo**, as in Open Check Lists: the arrows at the top take back this phone's latest edits
 one by one, and make them again (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z on a keyboard); a message says what was
@@ -111,9 +134,8 @@ undone. That covers food, spaces, receipts put away and what the app learned fro
 ten edits, while the app is open. Messages about an edit also have an Undo, for that edit while it is
 the latest. An undo is an edit of its own, which syncs like any other; in a shared pantry it takes back
 only what is still as the edit left it, not what another phone has changed since. The shopping list's
-screen has its own undo and redo, for the ticks and additions made there and from the pantry. Search has
-the magnifying glass at the top (Ctrl+F); the shopping list is in the menu, so that the arrows fit beside
-the title.
+screen has its own undo and redo, for the ticks and additions made there and from the pantry. The
+shopping list is in the menu, so that the arrows and the search fit beside the title.
 
 **What the app learns** (`shared/.../memory/Memory.kt`), kept on the device in `memory.json`, and shared
 with the pantry when it is shared:
@@ -127,7 +149,10 @@ with the pantry when it is shared:
   from the day of purchase ("As usual: 21 Oct"), so that one odd date does not pull it away. A receipt
   has one day of purchase for all its food; changing it moves the dates the app suggested, not those
   set by hand;
-- whether each food comes in boxes, as last said;
+- whether each food comes in boxes, as last said, and how long an opened box of it lasts (the middle of
+  the last five times);
+- which items of the shopping list, ticked as bought, were put away or let go, so they are not offered
+  again;
 - what each food is called on the shopping list ("Latte" for "Latte p.s. Friuli"), and in which sublist;
 - what the lines of receipts mean, and which lines to leave out (bags, deposits), and how many items
   one line is (a pack of 6 bottles). Lines are compared by their letters, so a line read once with a
@@ -166,6 +191,13 @@ one; it suggests the sublist it went on last time. Items of the list with the sa
 back on the list, and from then on that is the food's name there. A name already on the list, unticked,
 is not added again. Menu → *Shopping list* shows the list, to tick while shopping.
 
+**Putting away what was bought.** Items ticked on the shopping list in the last three days, here or in
+Open Check Lists, and not put away yet, show a card at the top of the pantry: *Put them away* opens the
+review screen of receipts with them, each as the food it went on the list for ("Latte" on the list is
+"Latte p.s. Friuli" in the pantry), where that food goes and until when it usually keeps; *Ignore* lets
+them go. Either way they are not offered again, unless ticked anew; undoing the putting away offers them
+again. In a shared pantry this is shared too, so two phones do not put the same shopping away twice.
+
 The list file is read and written exactly as Open Check Lists does: the same fields, the same
 per-item merge where the latest change wins, the same conditional writes on Nextcloud. The code for it
 (`shared/.../checklist` and `shared/.../sync`) is copied from Open Check Lists; a change to its file
@@ -188,9 +220,10 @@ meanwhile. Linking or unlinking the shopping list on one phone does so on all of
 and folded spaces stay each phone's own.
 
 From format 2 (version 0.4.0) items carry the day they were bought, from format 3 (0.6.0) the memory
-carries the phrases taught to voice commands, and from format 4 (0.7.0) items come in boxes, opened or
-not: a phone with an older version refuses the file, asking to be updated, rather than dropping them.
-Every phone sharing a pantry needs updating, then.
+carries the phrases taught to voice commands, from format 4 (0.7.0) items come in boxes, opened or not,
+and from format 5 (1.0.0) the memory knows how long opened boxes last and which items of the shopping
+list were put away: a phone with an older version refuses the file, asking to be updated, rather than
+dropping them. Every phone sharing a pantry needs updating, then.
 
 The file ends in `.pantry`, not `.json`, and is marked as a pantry inside: Open Check Lists takes every
 `.json` file in a shared folder for a list, and an empty pantry reads as an empty list there. Each app
@@ -219,7 +252,9 @@ and merged like an Open Check Lists list), `memory.json` (with a stamp per learn
 `settings.json`, `device.json` (this device's id, the linked list and the shared pantry) and
 `shopping-list.json` (this device's copy of the list). The shared pantry's file holds `pantry.json` and
 `memory.json` together (`sync/SharedPantry.kt`). A `pantry.json` this version cannot read is kept
-aside as `pantry-unreadable-<time>.json` instead of being overwritten.
+aside as `pantry-unreadable-<time>.json` instead of being overwritten. Files are made into text and
+written away from the thread that draws the screen; edits made quickly one after another are written
+once, with the latest state.
 
 ## The text reader's networks
 

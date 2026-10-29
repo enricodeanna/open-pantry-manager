@@ -20,11 +20,14 @@ import eu.studiodeanna.openpantrymanager.memory.combinedWith
 import eu.studiodeanna.openpantrymanager.memory.complete
 import eu.studiodeanna.openpantrymanager.memory.boxed
 import eu.studiodeanna.openpantrymanager.memory.food
+import eu.studiodeanna.openpantrymanager.memory.foodOnList
+import eu.studiodeanna.openpantrymanager.memory.handledFromList
 import eu.studiodeanna.openpantrymanager.memory.isBoxed
 import eu.studiodeanna.openpantrymanager.memory.forgetPhrase
 import eu.studiodeanna.openpantrymanager.memory.moveFor
 import eu.studiodeanna.openpantrymanager.memory.moved
 import eu.studiodeanna.openpantrymanager.memory.nextStamp
+import eu.studiodeanna.openpantrymanager.memory.openedLasted
 import eu.studiodeanna.openpantrymanager.memory.phraseMeans
 import eu.studiodeanna.openpantrymanager.memory.placeFor
 import eu.studiodeanna.openpantrymanager.memory.placed
@@ -56,6 +59,8 @@ import eu.studiodeanna.openpantrymanager.model.unopened
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
 import eu.studiodeanna.openpantrymanager.receipt.OcrLine
 import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
+import eu.studiodeanna.openpantrymanager.receipt.ReceiptLine
+import eu.studiodeanna.openpantrymanager.receipt.Recognition
 import eu.studiodeanna.openpantrymanager.receipt.ReceiptParser
 import eu.studiodeanna.openpantrymanager.receipt.Recognizer
 import eu.studiodeanna.openpantrymanager.store.DeviceState
@@ -86,7 +91,9 @@ import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
 import kotlin.random.Random
 import kotlin.time.Clock
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -96,8 +103,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.plus
 import kotlinx.datetime.todayIn
 import kotlinx.serialization.json.Json
 
@@ -169,6 +180,8 @@ class PantryRepository(
     private val now: () -> Long = ::currentTimeMillis,
     private val date: () -> LocalDate = ::systemToday,
     private val syncDelayMillis: Long = 800,
+    /** Where files are written out and read in, and syncs merged: away from the thread the screen is drawn on. */
+    private val work: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val _pantry = MutableStateFlow(PantryDocument())
     val pantry: StateFlow<PantryDocument> = _pantry.asStateFlow()
@@ -227,7 +240,7 @@ class PantryRepository(
         read(SETTINGS, Settings.serializer())?.let { _settings.value = it }
         read(MEMORY, Memory.serializer())?.let { _memory.value = it }
         files.read(PANTRY)?.let { text ->
-            runCatching { PantryCodec.decode(text) }
+            runCatching { withContext(work) { PantryCodec.decode(text) } }
                 .onSuccess { _pantry.value = it }
                 // Kept aside rather than overwritten by the next edit, so nothing is lost for good.
                 .onFailure { files.write("pantry-unreadable-${now()}.json", text) }
@@ -367,7 +380,7 @@ class PantryRepository(
             count == 1 -> PantryAction.UsedOne(item.name)
             else -> PantryAction.UsedSome(item.name, count)
         }
-        return taking(item, action, { editor.useSome(it, id, count) })
+        return taking(item, action, { editor.useSome(it, id, count) }, ::lastedOpened)
     }
 
     /**
@@ -376,19 +389,30 @@ class PantryRepository(
      */
     fun open(id: String, count: Int = 1): Taken? {
         val item = _pantry.value.item(id)?.takeIf { it.opened == null } ?: return null
-        return taking(item, PantryAction.Opened(item.name), { editor.open(it, id, today(), count).first }) { it.boxed(item.name, true) }
+        return taking(item, PantryAction.Opened(item.name), { editor.open(it, id, today(), count).first }) { _, memory ->
+            memory.boxed(item.name, true)
+        }
     }
 
     /** Takes all of an item out of the pantry: it is finished. */
     fun finish(id: String): Taken? {
         val item = _pantry.value.item(id) ?: return null
-        return taking(item, PantryAction.Finished(item.name), { editor.removeItem(it, id) })
+        return taking(item, PantryAction.Finished(item.name), { editor.removeItem(it, id) }, ::lastedOpened)
     }
 
+    /** What finishing [item] teaches: for an opened box, how long it lasted open. */
+    private fun lastedOpened(item: PantryItem, memory: Memory): Memory =
+        item.opened?.let { memory.openedLasted(item.name, it.daysUntil(today())) } ?: memory
+
     /** Takes some of [item] with [change], called [action], and says what that did. */
-    private fun taking(item: PantryItem, action: PantryAction, change: (PantryDocument) -> PantryDocument, learn: (Memory) -> Memory = { it }): Taken {
+    private fun taking(
+        item: PantryItem,
+        action: PantryAction,
+        change: (PantryDocument) -> PantryDocument,
+        learn: (PantryItem, Memory) -> Memory = { _, memory -> memory },
+    ): Taken {
         val before = _pantry.value
-        val step = edit(action, change, learn)
+        val step = edit(action, change) { learn(item, it) }
         val after = _pantry.value
         return Taken(action, step, after.item(item.id)?.quantity ?: 0, ranOut(item.name, before, after))
     }
@@ -508,16 +532,75 @@ class PantryRepository(
      * food it is, where that goes, how long it keeps; and that lines left out are not for the pantry.
      * Returns what undoes it, and how many items were put away.
      */
-    fun saveReceipt(entries: List<ReceiptEntry>, bought: LocalDate? = today()): Pair<UndoStep?, Int> {
+    fun saveReceipt(entries: List<ReceiptEntry>, bought: LocalDate? = today()): Pair<UndoStep?, Int> =
+        putAway(entries, bought, fromReceipt = true) { it }
+
+    /**
+     * Items ticked on the shopping list in the last [BOUGHT_DAYS] days that were neither put in the
+     * pantry nor let go yet: what was just bought, in the list's order.
+     */
+    fun boughtOnList(): List<Item> {
+        val doc = _shopping.value?.doc ?: return emptyList()
+        val since = now() - BOUGHT_DAYS * DAY_MILLIS
+        val handled = _memory.value.fromList
+        return doc.items.filter { it.done && !it.deleted && it.at >= since && handled[it.id] != it.at }.sortedWith(compareBy({ it.pos }, { it.id }))
+    }
+
+    /**
+     * What the shopping list's [items] probably are, as entries to check before they go in the pantry,
+     * bought on [bought]: the food each went on the list for, where it goes, until when it keeps. The
+     * item's text shows where it differs from the food's name.
+     */
+    fun entriesFor(items: List<Item>, bought: LocalDate = today()): List<ReceiptEntry> {
+        val spaces = liveSpaces()
+        val memory = _memory.value
+        return items.map { item ->
+            val food = memory.foodOnList(item.text)
+            val name = food?.name ?: item.text.trim()
+            ReceiptEntry(
+                line = ReceiptLine(if (nameKey(name) == nameKey(item.text)) "" else item.text.trim()),
+                name = name,
+                recognition = Recognition.Known,
+                quantity = 1,
+                space = memory.placeFor(name, spaces),
+                expires = food?.keepsDays?.let { bought.plus(DatePeriod(days = it)) },
+                include = true,
+            )
+        }
+    }
+
+    /**
+     * Puts the included [entries], made of the shopping list's [items] ([entriesFor]), in the pantry,
+     * bought on [bought], learns where each goes and how long it keeps, and that those items are put
+     * away: they are not offered again. Returns what undoes it, and how many items were put away.
+     */
+    fun putAwayFromList(entries: List<ReceiptEntry>, items: List<Item>, bought: LocalDate? = today()): Pair<UndoStep?, Int> {
+        val onList = _shopping.value?.doc?.items?.mapTo(HashSet()) { it.id }.orEmpty()
+        return putAway(entries, bought, fromReceipt = false) { it.handledFromList(items.associate { item -> item.id to item.at }, onList) }
+    }
+
+    /** Lets the shopping list's [items] go: bought, but not for the pantry, or put away by hand. They are not offered again. */
+    fun letGoFromList(items: List<Item>) {
+        val onList = _shopping.value?.doc?.items?.mapTo(HashSet()) { it.id }.orEmpty()
+        learnNow(_memory.value.handledFromList(items.associate { it.id to it.at }, onList))
+    }
+
+    /**
+     * Puts the included entries in the pantry and learns where each goes and how long it keeps; [fromReceipt],
+     * also what each receipt line is, and that lines left out are not for the pantry; and what [also] says.
+     */
+    private fun putAway(entries: List<ReceiptEntry>, bought: LocalDate?, fromReceipt: Boolean, also: (Memory) -> Memory): Pair<UndoStep?, Int> {
         val spaces = liveSpaces()
         val kept = entries.filter { it.include && it.name.isNotBlank() && it.space in spaces }
         val known = _memory.value
-        val step = edit(PantryAction.PutAway(kept.sumOf { it.quantity }), { doc ->
+        val count = kept.sumOf { it.quantity }
+        val action = if (fromReceipt) PantryAction.PutAway(count) else PantryAction.PutAwayFromList(count)
+        val step = edit(action, { doc ->
             kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought, known.isBoxed(e.name)).first }
         }) { memory ->
-            entries.fold(memory) { m, e ->
-                // Products the user added by hand have no receipt line to learn.
-                val printed = receiptKey(e.line.text).isNotEmpty()
+            also(entries.fold(memory) { m, e ->
+                // Products the user added by hand, and the shopping list's, have no receipt line to learn.
+                val printed = fromReceipt && receiptKey(e.line.text).isNotEmpty()
                 when {
                     e in kept -> {
                         // 6 items for 1 printed: a pack of 6, remembered for that line.
@@ -528,7 +611,7 @@ class PantryRepository(
                     !e.include && printed -> m.receiptSkips(e.line.text)
                     else -> m
                 }
-            }
+            })
         }
         return step to kept.size
     }
@@ -698,7 +781,7 @@ class PantryRepository(
         val current = _shopping.value ?: return@withLock
         _shopping.update { it?.copy(sync = SyncState.Syncing) }
         try {
-            val merged = syncWith(remoteFileFor(current.link, http), current.doc.pruned(now()))
+            val merged = withContext(work) { syncWith(remoteFileFor(current.link, http), current.doc.pruned(now())) }
             var changedMeanwhile = false
             _shopping.update {
                 if (it == null || it.link != current.link) return@update it
@@ -777,7 +860,7 @@ class PantryRepository(
         val link = device.pantryLink ?: return@withLock
         _sharing.update { it?.copy(sync = SyncState.Syncing) }
         try {
-            val merged = syncDocument(remoteFileFor(link, http), localShared(), PantryFormat)
+            val merged = withContext(work) { syncDocument(remoteFileFor(link, http), localShared(), PantryFormat) }
             if (device.pantryLink != link) return@withLock
             // What was changed here meanwhile stays, and goes out with the next round.
             val combined = localShared().merge(merged)
@@ -907,12 +990,31 @@ class PantryRepository(
 
     private fun showPantry(doc: PantryDocument) {
         _pantry.value = doc
-        scope.launch { saveLock.withLock { files.write(PANTRY, PantryCodec.encode(_pantry.value.pruned(now()))) } }
+        saveSoon(PANTRY, { _pantry.value }) { PantryCodec.encode(it.pruned(now())) }
     }
 
     private fun showMemory(memory: Memory) {
         _memory.value = memory
-        scope.launch { save(MEMORY, Memory.serializer(), _memory.value) }
+        saveSoon(MEMORY, { _memory.value }) { json.encodeToString(Memory.serializer(), it) }
+    }
+
+    /** By file: the state last written to it, guarded by [saveLock]. */
+    private val written = HashMap<String, Any>()
+
+    /**
+     * Writes [state] to the file [name], made into text by [encode] away from the thread the screen is
+     * drawn on. Edits made quickly one after the other are written once: a write still waiting finds the
+     * latest state written already.
+     */
+    private fun <T : Any> saveSoon(name: String, state: () -> T, encode: (T) -> String) {
+        scope.launch {
+            saveLock.withLock {
+                val latest = state()
+                if (written[name] === latest) return@withLock
+                files.write(name, withContext(work) { encode(latest) })
+                written[name] = latest
+            }
+        }
     }
 
     private suspend fun saveShoppingDoc() {
@@ -926,7 +1028,7 @@ class PantryRepository(
     }
 
     private suspend fun <T> read(name: String, serializer: kotlinx.serialization.KSerializer<T>): T? =
-        files.read(name)?.let { runCatching { json.decodeFromString(serializer, it) }.getOrNull() }
+        files.read(name)?.let { text -> runCatching { withContext(work) { json.decodeFromString(serializer, text) } }.getOrNull() }
 
     private suspend fun <T> save(name: String, serializer: kotlinx.serialization.KSerializer<T>, value: T) {
         saveLock.withLock { files.write(name, json.encodeToString(serializer, value)) }
@@ -943,6 +1045,9 @@ class PantryRepository(
         const val DEVICE = "device.json"
         /** This device's copy of the shopping list, in Open Check Lists' format. */
         const val SHOPPING = "shopping-list.json"
+        /** Items ticked on the shopping list longer ago than this are not taken for just bought. */
+        const val BOUGHT_DAYS = 3
+        const val DAY_MILLIS = 24L * 60 * 60 * 1000
         val json = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = false }
     }
 }

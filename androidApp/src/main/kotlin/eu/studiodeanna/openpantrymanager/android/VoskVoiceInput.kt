@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -39,8 +41,9 @@ import java.io.InputStream
  * Voice commands on Android: the microphone, heard by Vosk (Apache 2.0) on the phone, twice over: freely,
  * and listening for the words of commands and food only, which it hears better (see
  * [eu.studiodeanna.openpantrymanager.voice.understandVoice]). A language's model is downloaded once,
- * into the app's files; nothing that is said leaves the phone. The model is loaded while the voice
- * dialog is open, and let go after.
+ * into the app's files; nothing that is said leaves the phone. The model is loaded when the voice
+ * dialog first listens, and kept a few minutes after it closes, so that the next command starts at once;
+ * it is let go then, or as soon as the app is out of sight ([release]).
  */
 class VoskVoiceInput(private val activity: ComponentActivity) : VoiceInput {
     // Looked up when first needed: while the activity is being made, it has no files folder yet.
@@ -58,6 +61,14 @@ class VoskVoiceInput(private val activity: ComponentActivity) : VoiceInput {
     private var modelName: String? = null
     private var listening = false
     private var closeWhenDone = false
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val letGo = Runnable {
+        synchronized(lock) {
+            // A recognizer still at work keeps it until it stops.
+            if (listening) closeWhenDone = true else close()
+        }
+    }
 
     /** For tests: the next sentence is "heard" from this WAV file (16 kHz, mono, 16 bits) instead of the microphone. */
     var nextAudio: File? = null
@@ -142,10 +153,14 @@ class VoskVoiceInput(private val activity: ComponentActivity) : VoiceInput {
         }
 
     override fun finish() {
-        synchronized(lock) {
-            // A recognizer still at work keeps it until it stops.
-            if (listening) closeWhenDone = true else close()
-        }
+        handler.removeCallbacks(letGo)
+        handler.postDelayed(letGo, KEEP_MILLIS)
+    }
+
+    /** Lets the model go now: the app is out of sight, where the memory it takes is better given back. */
+    fun release() {
+        handler.removeCallbacks(letGo)
+        letGo.run()
     }
 
     private fun close() {
@@ -155,8 +170,9 @@ class VoskVoiceInput(private val activity: ComponentActivity) : VoiceInput {
         closeWhenDone = false
     }
 
-    /** The model of [language], loaded once while the dialog is open. */
+    /** The model of [language], loaded once and kept while commands follow each other. */
     private fun load(language: VoiceLanguage): Model {
+        handler.removeCallbacks(letGo)
         closeWhenDone = false
         model?.takeIf { modelName == language.model.name }?.let { return it }
         model?.close()
@@ -217,6 +233,8 @@ class VoskVoiceInput(private val activity: ComponentActivity) : VoiceInput {
     private companion object {
         const val TAG = "Voice"
         const val SAMPLE_RATE = 16_000f
+        /** How long the model stays loaded after the voice dialog closes. */
+        const val KEEP_MILLIS = 3 * 60 * 1000L
         /** A tenth of a second of sound. */
         const val BUFFER_BYTES = 3_200
         /** Long enough for a sentence, said slowly; then listening stops by itself. */

@@ -3,11 +3,13 @@ package eu.studiodeanna.openpantrymanager.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.text.intl.Locale
 import eu.studiodeanna.openpantrymanager.EnglishMessages
 import eu.studiodeanna.openpantrymanager.ItalianMessages
 import eu.studiodeanna.openpantrymanager.Messages
 import eu.studiodeanna.openpantrymanager.checklist.ListAction
 import eu.studiodeanna.openpantrymanager.model.PantryAction
+import eu.studiodeanna.openpantrymanager.store.LanguageChoice
 import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 
 /** The UI's texts in one language; [messages] are the matching ones raised by the shared code. */
@@ -43,6 +45,9 @@ interface Strings {
     val searchFood: String
     val closeSearch: String
     fun noFoodMatches(query: String): String
+    /** Offered when nothing matches a search. */
+    fun addNamedToPantry(name: String): String
+    fun putNamedOnList(name: String): String
     val scanReceipt: String
     val shoppingList: String
     val settings: String
@@ -59,6 +64,15 @@ interface Strings {
     val commonSpaces: List<String>
     val otherSpace: String
     val useSoon: String
+    /** The title of the daily reminder. */
+    fun useSoonCount(count: Int): String
+    /** An opened box usually lasts [days] days. */
+    fun usuallyLasts(days: Int): String
+    /** Items ticked on the shopping list, just bought, not put away yet. */
+    fun boughtOnList(count: Int): String
+    val putThemAway: String
+    val ignore: String
+    val putAwayTitle: String
     val withoutSpace: String
     val spaceOptions: String
     val expandSpace: String
@@ -229,6 +243,9 @@ interface Strings {
     val noShoppingList: String
     fun linkedTo(title: String): String
     val offerShopping: String
+    val expiryReminders: String
+    /** The short name of the launcher shortcut to voice commands. */
+    val voiceShort: String
     val theme: String
     val language: String
     val systemDefault: String
@@ -267,6 +284,8 @@ object EnglishStrings : Strings {
         is PantryAction.EditedFood -> "edited “${action.name}”"
         is PantryAction.MovedFood -> "moved “${action.name}”"
         is PantryAction.PutAway -> if (action.count == 1) "put away 1 item from the receipt" else "put away ${action.count} items from the receipt"
+        is PantryAction.PutAwayFromList ->
+            if (action.count == 1) "put away 1 item from the shopping list" else "put away ${action.count} items from the shopping list"
         is PantryAction.AddedSpace -> "added space “${action.name}”"
         is PantryAction.RenamedSpace -> "renamed space “${action.name}”"
         is PantryAction.MovedSpace -> "moved space “${action.name}”"
@@ -286,6 +305,8 @@ object EnglishStrings : Strings {
     override val searchFood = "Search food"
     override val closeSearch = "Close search"
     override fun noFoodMatches(query: String) = "No food called “$query”."
+    override fun addNamedToPantry(name: String) = "Add “$name” to the pantry"
+    override fun putNamedOnList(name: String) = "Put “$name” on the shopping list"
     override val scanReceipt = "Scan a receipt"
     override val shoppingList = "Shopping list"
     override val settings = "Settings"
@@ -302,6 +323,13 @@ object EnglishStrings : Strings {
     override val commonSpaces = listOf("Kitchen cupboard", "Fridge", "Freezer", "Pantry", "Cellar")
     override val otherSpace = "Another space…"
     override val useSoon = "Use soon"
+    override fun useSoonCount(count: Int) = if (count == 1) "1 food to use soon" else "$count foods to use soon"
+    override fun usuallyLasts(days: Int) = if (days == 1) "usually lasts 1 day" else "usually lasts $days days"
+    override fun boughtOnList(count: Int) =
+        if (count == 1) "You ticked 1 item on the shopping list." else "You ticked $count items on the shopping list."
+    override val putThemAway = "Put them away"
+    override val ignore = "Ignore"
+    override val putAwayTitle = "Put away the shopping"
     override val withoutSpace = "Without a space"
     override val spaceOptions = "Space options"
     override val expandSpace = "Expand space"
@@ -494,6 +522,8 @@ object EnglishStrings : Strings {
     override val noShoppingList = "No list linked."
     override fun linkedTo(title: String) = "Linked to “$title”."
     override val offerShopping = "Offer to put finished food on the shopping list"
+    override val expiryReminders = "Remind me once a day of food to use soon"
+    override val voiceShort = "Voice"
     override val theme = "Theme"
     override val language = "Language"
     override val systemDefault = "System default"
@@ -533,6 +563,9 @@ object ItalianStrings : Strings {
         is PantryAction.MovedFood -> "spostamento di “${action.name}”"
         is PantryAction.PutAway ->
             if (action.count == 1) "sistemazione di 1 prodotto dello scontrino" else "sistemazione di ${action.count} prodotti dello scontrino"
+        is PantryAction.PutAwayFromList ->
+            if (action.count == 1) "sistemazione di 1 prodotto della lista della spesa"
+            else "sistemazione di ${action.count} prodotti della lista della spesa"
         is PantryAction.AddedSpace -> "aggiunta dello spazio “${action.name}”"
         is PantryAction.RenamedSpace -> "cambio del nome dello spazio “${action.name}”"
         is PantryAction.MovedSpace -> "spostamento dello spazio “${action.name}”"
@@ -552,6 +585,8 @@ object ItalianStrings : Strings {
     override val searchFood = "Cerca un alimento"
     override val closeSearch = "Chiudi la ricerca"
     override fun noFoodMatches(query: String) = "Nessun alimento si chiama “$query”."
+    override fun addNamedToPantry(name: String) = "Aggiungi “$name” alla dispensa"
+    override fun putNamedOnList(name: String) = "Metti “$name” nella lista della spesa"
     override val scanReceipt = "Scansiona uno scontrino"
     override val shoppingList = "Lista della spesa"
     override val settings = "Impostazioni"
@@ -568,6 +603,13 @@ object ItalianStrings : Strings {
     override val commonSpaces = listOf("Mobile della cucina", "Frigorifero", "Congelatore", "Dispensa", "Cantina")
     override val otherSpace = "Un altro spazio…"
     override val useSoon = "Da consumare presto"
+    override fun useSoonCount(count: Int) = if (count == 1) "1 alimento da consumare presto" else "$count alimenti da consumare presto"
+    override fun usuallyLasts(days: Int) = if (days == 1) "di solito dura 1 giorno" else "di solito dura $days giorni"
+    override fun boughtOnList(count: Int) =
+        if (count == 1) "Hai spuntato 1 prodotto nella lista della spesa." else "Hai spuntato $count prodotti nella lista della spesa."
+    override val putThemAway = "Mettili in dispensa"
+    override val ignore = "Ignora"
+    override val putAwayTitle = "Metti via la spesa"
     override val withoutSpace = "Senza spazio"
     override val spaceOptions = "Opzioni dello spazio"
     override val expandSpace = "Espandi lo spazio"
@@ -760,6 +802,8 @@ object ItalianStrings : Strings {
     override val noShoppingList = "Nessuna lista collegata."
     override fun linkedTo(title: String) = "Collegata a “$title”."
     override val offerShopping = "Proponi di mettere nella lista della spesa ciò che finisce"
+    override val expiryReminders = "Ricordami ogni giorno cosa consumare presto"
+    override val voiceShort = "Voce"
     override val theme = "Tema"
     override val language = "Lingua"
     override val systemDefault = "Predefinito di sistema"
@@ -768,6 +812,13 @@ object ItalianStrings : Strings {
 }
 
 val LocalStrings = staticCompositionLocalOf<Strings> { EnglishStrings }
+
+/** The texts in the language the settings choose: the system's, where the app speaks it, else English. */
+fun stringsFor(language: LanguageChoice): Strings = when (language) {
+    LanguageChoice.English -> EnglishStrings
+    LanguageChoice.Italian -> ItalianStrings
+    LanguageChoice.System -> if (Locale.current.language == "it") ItalianStrings else EnglishStrings
+}
 
 val strings: Strings
     @Composable @ReadOnlyComposable get() = LocalStrings.current
