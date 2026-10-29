@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.voice
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
 import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.phrasesIn
 import eu.studiodeanna.openpantrymanager.memory.placeFor
@@ -15,8 +16,11 @@ import kotlinx.serialization.Serializable
 
 /** What a sentence said to the app asks it to do. */
 sealed interface VoiceCommand {
-    /** [count] of [item] were used up: eaten, drunk, cooked. All of it, when [count] is its quantity or more. */
-    data class Use(val item: PantryItem, val count: Int) : VoiceCommand
+    /**
+     * [count] of [item] were used up: eaten, drunk, cooked. All of it, when [count] is its quantity or
+     * more. With an [amount] ("100 grammi"), that much was taken from an opened box instead.
+     */
+    data class Use(val item: PantryItem, val count: Int, val amount: Measure? = null) : VoiceCommand
 
     /** [item] is finished, all of it. */
     data class Finish(val item: PantryItem) : VoiceCommand
@@ -117,7 +121,8 @@ private const val NEAR = 0.25
 fun voiceVocabulary(language: VoiceLanguage, pantry: PantryDocument, memory: Memory): List<String> {
     val names = pantry.visibleSpaces().map { it.name } + pantry.liveItems().map { it.name } + memory.foods.values.map { it.name }
     // Phrases taught are kept as written, apostrophes too ("c'è").
-    val words = language.use + language.finish + language.add + language.move + language.take + language.open + language.numbers.keys + language.all +
+    val words = language.use + language.finish + language.add + language.move + language.take + language.open + language.numbers.keys +
+        language.units.keys + language.all +
         language.fillers + language.containers + language.into + language.from + language.foods + language.spoken +
         memory.phrasesIn(language.code).keys
     return (words.flatMap { it.split(' ') } + names.flatMap { name -> name.lowercase().split(Regex("[^\\p{L}\\p{N}]+")) })
@@ -149,6 +154,7 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
     // Taken from a space of the pantry, food was used; taken elsewhere, it was bought.
     val verb = if (found.take && from != null) VoiceAction.Use else found.action
     var count: Int? = null
+    var amount: Measure? = null
     var all = false
     var tens: Int? = null
     for (i in words.indices) {
@@ -157,7 +163,13 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
         // "Twenty four", as the recognizer writes it, is one number.
         if (number != null && number < 10 && tens != null && taken.getOrNull(i - 1) == true) number += tens
         tens = number?.takeIf { it in 20..90 && it % 10 == 0 }
+        // A number with a unit after it is an amount: "100 grammi", "un etto".
+        val unit = words.getOrNull(i + 1)?.let { language.units[it] }
         when {
+            number != null && unit != null -> {
+                amount = Measure(unit.value * number, unit.unit)
+                taken[i + 1] = true
+            }
             number != null -> count = maxOf(count ?: 0, number)
             words[i] in language.all -> all = true
             else -> continue
@@ -165,7 +177,7 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
         taken[i] = true
     }
     // What is left names the food.
-    val ignored = language.fillers + language.containers + language.into + language.from
+    val ignored = language.fillers + language.containers + language.into + language.from + language.units.keys
     val food = words.indices.filter { !taken[it] && words[it] !in ignored }
     if (food.isEmpty()) return notUnderstood
     val foodWords = food.map { words[it] }
@@ -204,6 +216,7 @@ fun understandVoice(heard: String, language: VoiceLanguage, pantry: PantryDocume
                 VoiceAction.Open -> VoiceCommand.Open(item, if (all) item.quantity else count ?: 1)
                 VoiceAction.Use -> when {
                     all -> VoiceCommand.Finish(item)
+                    amount != null && item.size != null -> VoiceCommand.Use(item, 1, amount)
                     count == null && item.boxed && item.opened == null -> VoiceCommand.Open(item, 1)
                     else -> VoiceCommand.Use(item, count ?: 1)
                 }

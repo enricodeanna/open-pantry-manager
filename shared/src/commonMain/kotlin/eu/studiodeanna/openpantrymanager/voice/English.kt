@@ -30,6 +30,12 @@ val English = VoiceLanguage(
         "gave me", "gave us", "given me", "given us", "was given", "were given", "been given",
     ),
     move = setOf("moved", "move", "moves", "transferred", "transfer", "shifted", "shift"),
+    units = mapOf(
+        "grams" to grams(1.0), "gram" to grams(1.0), "kilo" to grams(1000.0), "kilos" to grams(1000.0),
+        "kilogram" to grams(1000.0), "kilograms" to grams(1000.0), "kg" to grams(1000.0),
+        "millilitres" to millilitres(1.0), "milliliters" to millilitres(1.0), "ml" to millilitres(1.0),
+        "litre" to millilitres(1000.0), "litres" to millilitres(1000.0), "liter" to millilitres(1000.0), "liters" to millilitres(1000.0),
+    ),
     // "I started a new box of cookies": opened.
     open = setOf("opened", "open", "opens", "started", "start", "starts"),
     numbers = mapOf(

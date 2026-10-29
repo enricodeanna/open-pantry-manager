@@ -57,6 +57,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -96,10 +99,14 @@ import eu.studiodeanna.openpantrymanager.SyncState
 import eu.studiodeanna.openpantrymanager.Taken
 import eu.studiodeanna.openpantrymanager.UndoStep
 import eu.studiodeanna.openpantrymanager.checklist.Item
+import eu.studiodeanna.openpantrymanager.costs.Measure
 import eu.studiodeanna.openpantrymanager.memory.Memory
+import eu.studiodeanna.openpantrymanager.memory.food
+import eu.studiodeanna.openpantrymanager.memory.usualServing
 import eu.studiodeanna.openpantrymanager.memory.phrasesIn
 import eu.studiodeanna.openpantrymanager.model.PantryAction
 import eu.studiodeanna.openpantrymanager.model.PantryItem
+import eu.studiodeanna.openpantrymanager.model.item
 import eu.studiodeanna.openpantrymanager.model.Space
 import eu.studiodeanna.openpantrymanager.model.itemsBySpace
 import eu.studiodeanna.openpantrymanager.model.liveItems
@@ -122,6 +129,12 @@ private sealed interface Dialog {
     data class DeleteSpace(val space: Space) : Dialog
     data class Edit(val item: PantryItem) : Dialog
     data class Move(val item: PantryItem) : Dialog
+
+    /**
+     * How much of the opened box [item] was used; [opening]: it was opened just now. [thenShopping]:
+     * that was its last closed box, so the shopping list is offered after.
+     */
+    data class Amount(val item: String, val opening: Boolean, val thenShopping: Boolean = false) : Dialog
     data class Shopping(val name: String, val why: WhyShopping = WhyShopping.Finished) : Dialog
     data object LinkShopping : Dialog
     data object SharePantry : Dialog
@@ -140,6 +153,8 @@ fun PantryScreen(
     repository: PantryRepository,
     snackbars: SnackbarHostState,
     onShopping: () -> Unit,
+    /** Shows what the food cost. */
+    onCosts: () -> Unit = {},
     /** Opens the receipt photos; null where receipts cannot be read. */
     onScan: (() -> Unit)?,
     /** Hears voice commands; null where the platform cannot. */
@@ -209,9 +224,10 @@ fun PantryScreen(
     /** Says what taking some of [item] did, with Undo, and offers the shopping list if none is left unopened. */
     fun took(item: PantryItem, taken: Taken?) {
         taken ?: return
-        val message = when (taken.action) {
+        val message = when (val action = taken.action) {
             is PantryAction.Opened -> texts.openedMessage(item.name)
             is PantryAction.Finished -> texts.finishedMessage(item.name)
+            is PantryAction.UsedAmount -> texts.usedAmount(item.name, taken.leftAmount?.let(texts::measure) ?: texts.measure(action.amount))
             else -> texts.left(item.name, taken.left)
         }
         announce(message, taken.step)
@@ -230,7 +246,16 @@ fun PantryScreen(
             is VoiceCommand.Check -> return Obeyed.IfSaid(command.heard)
             is VoiceCommand.Use -> {
                 dialog = null
-                took(command.item, repository.useSome(command.item.id, command.count))
+                val amount = command.amount
+                if (amount == null || command.item.size == null) {
+                    took(command.item, repository.useSome(command.item.id, command.count))
+                } else {
+                    // "100 grammi": from the box open, or one opened for it.
+                    val opened = if (command.item.opened != null) null else repository.open(command.item.id)
+                    val box = opened?.item ?: command.item.id
+                    took(command.item, repository.useAmount(box, amount.value))
+                    if (opened?.ranOut == true) ranOut(command.item.name, lastOpened = true)
+                }
             }
             is VoiceCommand.Finish -> {
                 dialog = null
@@ -266,7 +291,17 @@ fun PantryScreen(
         return Obeyed.Done
     }
 
-    fun useOne(item: PantryItem) = took(item, repository.useOne(item.id))
+    /** A tap on an item's count: one used; for a box of known size, opened, and then how much was used is asked. */
+    fun useOne(item: PantryItem) {
+        if (!item.boxed || item.size == null) return took(item, repository.useOne(item.id))
+        if (item.opened != null) {
+            dialog = Dialog.Amount(item.id, opening = false)
+            return
+        }
+        val opened = repository.open(item.id) ?: return
+        announce(texts.openedMessage(item.name), opened.step)
+        dialog = Dialog.Amount(opened.item ?: return, opening = true, thenShopping = opened.ranOut)
+    }
 
     // Opened from a shortcut of the launcher icon.
     LaunchedEffect(shortcut) {
@@ -345,6 +380,7 @@ fun PantryScreen(
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 // Searching is used more, so it has the icon; with undo and redo, one more would not fit beside the title.
                                 MenuItem(strings.shoppingList) { menu = false; onShopping() }
+                                MenuItem(strings.costs) { menu = false; onCosts() }
                                 MenuItem(strings.addSpace) { menu = false; dialog = Dialog.AddSpace }
                                 if (spaces.isNotEmpty()) {
                                     MenuItem(strings.expandAll, enabled = collapsed.isNotEmpty()) {
@@ -507,10 +543,10 @@ fun PantryScreen(
             initialName = d.name,
             initialQuantity = d.quantity,
             onDismiss = { dialog = null },
-        ) { name, space, quantity, expires, bought, boxed ->
+        ) { food ->
             dialog = null
-            val step = repository.addItem(name, space, quantity, expires, bought, boxed)
-            announce(texts.addedTo(name, spaces.firstOrNull { it.id == space }?.name.orEmpty()), step)
+            val step = repository.addItem(food.name, food.space, food.quantity, food.expires, food.bought, food.boxed, food.size, food.price, food.shop)
+            announce(texts.addedTo(food.name, spaces.firstOrNull { it.id == food.space }?.name.orEmpty()), step)
         }
         Dialog.AddSpace -> AddSpaceDialog(spaces.map { it.name }, onDismiss = { dialog = null }) {
             dialog = null
@@ -535,9 +571,9 @@ fun PantryScreen(
             today = today,
             keepsDays = repository.food(d.item.name)?.keepsDays,
             onDismiss = { dialog = null },
-            onSave = { name, quantity, expires, space, bought, boxed, opened ->
+            onSave = { name, quantity, expires, space, bought, boxed, opened, size, left ->
                 dialog = null
-                val edited = repository.editItem(d.item.id, name, quantity, expires, space, bought, boxed, opened)
+                val edited = repository.editItem(d.item.id, name, quantity, expires, space, bought, boxed, opened, size, left)
                 if (edited?.ranOut == true) ranOut(d.item.name, lastOpened = true)
             },
             onFinished = {
@@ -549,6 +585,28 @@ fun PantryScreen(
                 announce(texts.deleted(d.item.name), repository.removeItem(d.item.id))
             },
         )
+        is Dialog.Amount -> {
+            val item = doc.item(d.item)
+            val size = item?.size
+            fun done() {
+                dialog = null
+                if (d.thenShopping && item != null) ranOut(item.name, lastOpened = true)
+            }
+            if (item == null || size == null) {
+                LaunchedEffect(d) { done() }
+            } else {
+                AmountDialog(
+                    item = item,
+                    size = size,
+                    usual = memory.food(item.name)?.usualServing(),
+                    opening = d.opening,
+                    onDismiss = ::done,
+                ) { amount ->
+                    done()
+                    took(item, repository.useAmount(item.id, amount))
+                }
+            }
+        }
         is Dialog.Move -> MoveDialog(d.item, spaces, repository.moveFor(d.item), onDismiss = { dialog = null }) { space, count ->
             dialog = null
             val step = repository.moveItem(d.item.id, space, count)
@@ -801,7 +859,8 @@ private fun ItemRow(
             Text(item.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val opened = item.opened?.let { day ->
                 val lasts = usedUpBy?.let { " (" + strings.usuallyLasts(day.daysUntil(it)) + ")" }.orEmpty()
-                strings.openedAgo(day.daysUntil(today)) + lasts
+                val left = item.size?.let { size -> item.left?.let { " · " + strings.amountLeft(strings.measure(Measure(it, size.unit))) } }.orEmpty()
+                strings.openedAgo(day.daysUntil(today)) + lasts + left
             }
             val expiry = item.expires?.let { strings.expiry(it, today) }
             if (opened != null || expiry != null) {
@@ -854,7 +913,7 @@ private fun CountBadge(item: PantryItem, onClick: () -> Unit) {
         val shape = if (item.boxed) RoundedCornerShape(BADGE_CORNER) else CircleShape
         Box(
             Modifier.size(BADGE_SIZE).then(
-                if (opened) Modifier.drawBehind { openBox(colors.primary) } else Modifier.background(colors.primaryContainer, shape),
+                if (opened) Modifier.drawBehind { openBox(colors.primary, colors.primaryContainer, fullness(item)) } else Modifier.background(colors.primaryContainer, shape),
             ),
             contentAlignment = Alignment.Center,
         ) {
@@ -872,14 +931,33 @@ private fun CountBadge(item: PantryItem, onClick: () -> Unit) {
 private val BADGE_SIZE = 30.dp
 private val BADGE_CORNER = 6.dp
 
-/** A box without its lid: its sides and its bottom, with rounded corners below. */
-private fun DrawScope.openBox(color: Color) {
+/** How full an opened box of known size still is, from 0 to 1; null when that is not known. */
+private fun fullness(item: PantryItem): Float? {
+    val size = item.size ?: return null
+    val left = item.left ?: return null
+    return (left / (size.value * item.quantity)).toFloat().coerceIn(0f, 1f)
+}
+
+/**
+ * A box without its lid: its sides and its bottom, with rounded corners below; filled in [fill] up to
+ * how full it still is ([full], when known).
+ */
+private fun DrawScope.openBox(color: Color, fill: Color, full: Float?) {
     val stroke = 2.dp.toPx()
     val corner = BADGE_CORNER.toPx()
     val left = stroke / 2
     val right = size.width - stroke / 2
     val top = stroke / 2
     val bottom = size.height - stroke / 2
+    if (full != null && full > 0f) {
+        val height = (size.height - stroke) * full
+        drawRoundRect(
+            fill,
+            topLeft = Offset(stroke, size.height - stroke / 2 - height),
+            size = Size(size.width - 2 * stroke, height),
+            cornerRadius = CornerRadius(corner / 2),
+        )
+    }
     val sides = Path().apply {
         moveTo(left, top)
         lineTo(left, bottom - corner)

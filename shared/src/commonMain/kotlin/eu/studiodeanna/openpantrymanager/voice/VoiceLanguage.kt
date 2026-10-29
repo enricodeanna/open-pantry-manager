@@ -1,5 +1,8 @@
 package eu.studiodeanna.openpantrymanager.voice
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
+
 /**
  * The speech recognizer's model for one language: a Vosk model, downloaded once from [url] (checked
  * against [sha256]) and unpacked into a folder called [name].
@@ -42,6 +45,8 @@ class VoiceLanguage(
     val numbers: Map<String, Int>,
     /** Words saying all of it. */
     val all: Set<String>,
+    /** Units said after a number ("100 grammi", "un etto"): what one of each is. */
+    val units: Map<String, Measure> = emptyMap(),
     /** Words that say nothing about which food: subjects, auxiliaries, articles, "of". */
     val fillers: Set<String>,
     /** What food comes in: boxes, bottles, packs. They are not part of its name. */
@@ -75,3 +80,8 @@ object VoiceLanguages {
     /** The voice commands of the language with this ISO code; null if there are none yet. */
     fun forCode(code: String): VoiceLanguage? = all.firstOrNull { it.code == code }
 }
+
+internal fun grams(value: Double) = Measure(value, MeasureUnit.Gram)
+
+internal fun millilitres(value: Double) = Measure(value, MeasureUnit.Millilitre)
+

@@ -6,9 +6,10 @@ import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 /**
  * A thing the app has learned, the unit two copies of the memory are merged by: all it knows of a
  * food, where anything went from a space, what a receipt line is, what a phrase said to voice commands
- * means, or that an item of the shopping list was put away. Each has a key: "food:" and the food's name
- * key, "moves:" and the space's id, "line:" and the line's receipt key, "phrase:", the language's code,
- * ":" and the phrase, "listed:" and the list item's id.
+ * means, that an item of the shopping list was put away, or which shop a receipt's header names. Each
+ * has a key: "food:" and the food's name key, "moves:" and the space's id, "line:" and the line's receipt
+ * key, "phrase:", the language's code, ":" and the phrase, "listed:" and the list item's id, "shop:" and
+ * the header's receipt key.
  */
 internal sealed interface Learned {
     data class OfFood(val food: Food) : Learned
@@ -16,6 +17,7 @@ internal sealed interface Learned {
     data class Line(val food: String?, val pack: Int?, val skipped: Boolean) : Learned
     data class Phrase(val means: VoiceAction) : Learned
     data class FromList(val at: Long) : Learned
+    data class Shop(val name: String) : Learned
 }
 
 private const val FOOD = "food:"
@@ -23,6 +25,7 @@ private const val MOVES = "moves:"
 private const val LINE = "line:"
 private const val PHRASE = "phrase:"
 private const val FROM_LIST = "listed:"
+private const val SHOP = "shop:"
 
 /** Everything learned, by key. */
 internal fun Memory.learned(): Map<String, Learned> = buildMap {
@@ -35,6 +38,7 @@ internal fun Memory.learned(): Map<String, Learned> = buildMap {
         meanings.forEach { (phrase, action) -> put("$PHRASE$language:$phrase", Learned.Phrase(action)) }
     }
     fromList.forEach { (id, at) -> put(FROM_LIST + id, Learned.FromList(at)) }
+    shops.forEach { (header, name) -> put(SHOP + header, Learned.Shop(name)) }
 }
 
 private fun memoryOf(learned: Map<String, Learned>, stamps: Map<String, Stamp>): Memory {
@@ -45,6 +49,7 @@ private fun memoryOf(learned: Map<String, Learned>, stamps: Map<String, Stamp>):
     val skipped = HashSet<String>()
     val phrases = HashMap<String, MutableMap<String, VoiceAction>>()
     val fromList = HashMap<String, Long>()
+    val shops = HashMap<String, String>()
     for ((key, value) in learned) {
         when (value) {
             is Learned.OfFood -> foods[key.removePrefix(FOOD)] = value.food
@@ -60,6 +65,7 @@ private fun memoryOf(learned: Map<String, Learned>, stamps: Map<String, Stamp>):
                 phrases.getOrPut(language) { HashMap() }[phrase] = value.means
             }
             is Learned.FromList -> fromList[key.removePrefix(FROM_LIST)] = value.at
+            is Learned.Shop -> shops[key.removePrefix(SHOP)] = value.name
         }
     }
     return Memory(
@@ -70,6 +76,7 @@ private fun memoryOf(learned: Map<String, Learned>, stamps: Map<String, Stamp>):
         skipped = skipped,
         phrases = phrases,
         fromList = fromList,
+        shops = shops,
         stamps = stamps,
     )
 }
@@ -181,6 +188,9 @@ private fun combine(a: Food, b: Food): Food {
         shoppingName = newer.shoppingName ?: older.shoppingName,
         boxed = newer.boxed ?: older.boxed,
         openLasts = (older.openLasts + newer.openLasts).takeLast(KEEPS_COMBINED),
+        size = newer.size ?: older.size,
+        servings = (older.servings + newer.servings).takeLast(KEEPS_COMBINED),
+        group = newer.group ?: older.group,
     )
 }
 

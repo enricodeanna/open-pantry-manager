@@ -39,10 +39,11 @@ data class SharedPantry(
         /**
          * 2: items have the day they were bought. 3: the memory has phrases taught to voice commands. 4:
          * items come in boxes, opened or not. 5: the memory has how long opened boxes last, and which
-         * items of the shopping list were put away. An older app refuses the file rather than dropping
-         * what it does not know.
+         * items of the shopping list were put away. 6: boxes have a size and what is left of them; the
+         * memory has sizes, servings, groups of products and shops. An older app refuses the file rather
+         * than dropping what it does not know. The costs are in a file of their own (CostsDocument).
          */
-        const val FORMAT = 5
+        const val FORMAT = 6
         const val EXTENSION = ".pantry"
     }
 }

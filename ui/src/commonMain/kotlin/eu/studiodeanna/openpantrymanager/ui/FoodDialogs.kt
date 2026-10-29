@@ -20,6 +20,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,6 +38,8 @@ import eu.studiodeanna.openpantrymanager.PantryRepository
 import eu.studiodeanna.openpantrymanager.model.PantryItem
 import eu.studiodeanna.openpantrymanager.model.Space
 import eu.studiodeanna.openpantrymanager.model.nameKey
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
 import kotlinx.datetime.LocalDate
 
 /**
@@ -52,7 +55,7 @@ fun AddFoodDialog(
     initialName: String = "",
     initialQuantity: Int = 1,
     onDismiss: () -> Unit,
-    onAdd: (name: String, space: String, quantity: Int, expires: LocalDate?, bought: LocalDate?, boxed: Boolean) -> Unit,
+    onAdd: (food: NewFood) -> Unit,
 ) {
     var field by remember { mutableStateOf(TextFieldValue(initialName, TextRange(initialName.length))) }
     val name = field.text
@@ -66,13 +69,16 @@ fun AddFoodDialog(
     val food = remember(name) { repository.food(name) }
     var boxedPicked by remember { mutableStateOf<Boolean?>(null) }
     val boxed = boxedPicked ?: (food?.boxed == true)
+    var size by remember { mutableStateOf<Measure?>(null) }
+    var price by remember { mutableStateOf<Long?>(null) }
+    var shop by remember { mutableStateOf("") }
     val suggestions = remember(name) { repository.complete(name).filterNot { nameKey(it.name) == nameKey(name) }.take(4) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(usual) { if (!spacePicked && usual != null) space = usual }
     val chosen = space?.takeIf { id -> spaces.any { it.id == id } }
     val ok = name.isNotBlank() && chosen != null
     fun add() {
-        if (ok) onAdd(name.trim(), chosen, quantity, expires, bought, boxed)
+        if (ok) onAdd(NewFood(name.trim(), chosen, quantity, expires, bought, boxed, (size ?: food?.size).takeIf { boxed }, price, shop.trim().takeIf { it.isNotEmpty() }))
     }
 
     AlertDialog(
@@ -124,8 +130,28 @@ fun AddFoodDialog(
                     QuantityStepper(quantity, { quantity = it })
                 }
                 BoxedField(boxed) { boxedPicked = it }
+                if (boxed) {
+                    // As the food came last time, until changed; keyed so it follows the name typed.
+                    key(food?.size) { SizeField(food?.size, strings.packageSize, Modifier.fillMaxWidth()) { size = it } }
+                }
                 BoughtField(bought, today) { bought = it }
                 ExpiryField(expires, today, food?.keepsDays, from = bought ?: today) { expires = it }
+                // What it cost goes in the costs, not in the pantry's lists.
+                MoneyField(price, strings.pricePaid, Modifier.fillMaxWidth()) { price = it }
+                val each = price?.takeIf { quantity > 1 }
+                if (each != null) {
+                    Text(strings.eachCosts(strings.money(each / quantity)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (price != null) {
+                    OutlinedTextField(
+                        value = shop,
+                        onValueChange = { shop = it },
+                        label = { Text(strings.shop) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
             LaunchedEffect(Unit) { focus.requestFocus() }
         },
@@ -133,6 +159,20 @@ fun AddFoodDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
+
+/** Food to put in the pantry, as the add dialog has it: what, where, how many, until when, and what it cost. */
+data class NewFood(
+    val name: String,
+    val space: String,
+    val quantity: Int,
+    val expires: LocalDate?,
+    val bought: LocalDate?,
+    val boxed: Boolean,
+    val size: Measure?,
+    /** In cents, for all of them. */
+    val price: Long?,
+    val shop: String?,
+)
 
 /**
  * Changes an item, or takes it out: finished (which may offer the shopping list) or deleted. Food in
@@ -145,7 +185,7 @@ fun ItemDialog(
     today: LocalDate,
     keepsDays: Int?,
     onDismiss: () -> Unit,
-    onSave: (name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate?, boxed: Boolean, opened: LocalDate?) -> Unit,
+    onSave: (name: String, quantity: Int, expires: LocalDate?, space: String, bought: LocalDate?, boxed: Boolean, opened: LocalDate?, size: Measure?, left: Double?) -> Unit,
     onFinished: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -156,6 +196,8 @@ fun ItemDialog(
     var bought by remember { mutableStateOf(item.bought) }
     var boxed by remember { mutableStateOf(item.boxed) }
     var opened by remember { mutableStateOf(item.opened) }
+    var size by remember { mutableStateOf(item.size) }
+    var left by remember { mutableStateOf(item.left) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(strings.editFood) },
@@ -177,8 +219,13 @@ fun ItemDialog(
                 }
                 BoxedField(boxed) { boxed = it }
                 if (boxed) {
+                    SizeField(item.size, strings.packageSize, Modifier.fillMaxWidth()) { size = it }
                     CheckRow(opened?.let { "${strings.boxOpened} · ${strings.shortDate(it, today)}" } ?: strings.boxOpened, opened != null) {
                         opened = if (it) item.opened ?: today else null
+                    }
+                    val unit = size?.unit
+                    if (opened != null && unit != null) {
+                        AmountField(item.left ?: size?.let { it.value * quantity }, unit, strings.leftInBox, Modifier.fillMaxWidth()) { left = it }
                     }
                 }
                 BoughtField(bought, today) { bought = it }
@@ -191,7 +238,7 @@ fun ItemDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(name, quantity, expires, space, bought, boxed, opened.takeIf { boxed }) },
+                onClick = { onSave(name, quantity, expires, space, bought, boxed, opened.takeIf { boxed }, size.takeIf { boxed }, left) },
                 enabled = name.isNotBlank(),
             ) { Text(strings.save) }
         },
@@ -263,3 +310,49 @@ private fun BoxedField(boxed: Boolean, onChange: (Boolean) -> Unit) {
         }
     }
 }
+
+/**
+ * How much of an opened box of [size] was used: the usual amount ([usual], learned), a few round ones
+ * below what is left, the rest of the box, or any amount typed. [opening]: the box was opened just now,
+ * and leaving says it was only opened.
+ */
+@Composable
+fun AmountDialog(item: PantryItem, size: Measure, usual: Double?, opening: Boolean, onDismiss: () -> Unit, onUse: (Double) -> Unit) {
+    val left = item.left ?: (size.value * item.quantity)
+    // Of boxes counted together, the rest of the one in use.
+    val rest = (left - (item.quantity - 1) * size.value).coerceAtLeast(0.0)
+    val steps = (listOfNotNull(usual) + ROUND_AMOUNTS.getValue(size.unit)).distinct().filter { it < rest }
+    var typed by remember { mutableStateOf<Double?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(item.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(strings.howMuchUsed, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    strings.amountLeft(strings.measure(Measure(left, size.unit))),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    steps.forEach { amount ->
+                        val label = strings.measure(Measure(amount, size.unit))
+                        FilterChip(selected = false, onClick = { onUse(amount) }, label = { Text(if (amount == usual) strings.asUsual(label) else label) })
+                    }
+                    FilterChip(selected = false, onClick = { onUse(rest) }, label = { Text(strings.theRest) })
+                }
+                AmountField(null, size.unit, strings.howMuchUsed, Modifier.fillMaxWidth()) { typed = it?.takeIf { amount -> amount > 0 } }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { typed?.let(onUse) }, enabled = typed != null) { Text(strings.use) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(if (opening) strings.justOpened else strings.cancel) } },
+    )
+}
+
+/** Amounts offered at a tap, by unit: what a serving often is. */
+private val ROUND_AMOUNTS = mapOf(
+    MeasureUnit.Gram to listOf(50.0, 100.0, 200.0),
+    MeasureUnit.Millilitre to listOf(50.0, 100.0, 250.0),
+)

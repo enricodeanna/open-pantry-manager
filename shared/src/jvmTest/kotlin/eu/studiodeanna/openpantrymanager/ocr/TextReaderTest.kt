@@ -48,8 +48,9 @@ class TextReaderTest {
         )
         for (photo in listOf("tilted.jpg", "shadow.jpg", "small.jpg")) {
             val lines = ReceiptParser.parse(read(photo))
-            // The prices too, crossed zeros and all.
-            assertEquals(listOf(1.15, 1.89, 1.78, 3.49, 0.99, 2.34, 0.10), lines.map { it.price }, photo)
+            // The prices too, crossed zeros and all, the passata's less its discount of 0,10 (read "-8,10" once).
+            assertEquals(listOf(1.15, 1.89, 1.78, 3.49, 0.89, 2.34, 0.10), lines.map { it.price }, photo)
+            assertEquals(1.234, lines[1].kilograms, photo)
             assertEquals(listOf(1, 1, 2, 1, 1, 1, 1), lines.map { it.quantity }, photo)
             // In a photo this small, print 10 pixels high, a letter here and there is read as a digit ("SHOPPER B10").
             if (photo != "small.jpg") assertEquals(expected, lines.map { "${it.quantity} ${guessName(it.text)}" }, photo)

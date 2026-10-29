@@ -4,6 +4,11 @@ import eu.studiodeanna.openpantrymanager.checklist.ListAction
 import eu.studiodeanna.openpantrymanager.checklist.ListCodec
 import eu.studiodeanna.openpantrymanager.checklist.itemsBySection
 import eu.studiodeanna.openpantrymanager.checklist.visibleSections
+import eu.studiodeanna.openpantrymanager.costs.CostGrouping
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
+import eu.studiodeanna.openpantrymanager.costs.costLines
+import eu.studiodeanna.openpantrymanager.costs.livePurchases
 import eu.studiodeanna.openpantrymanager.model.PantryAction
 import eu.studiodeanna.openpantrymanager.model.UndoState
 import eu.studiodeanna.openpantrymanager.model.item
@@ -158,7 +163,7 @@ class PantryRepositoryTest {
                     OcrLine("TOTALE 1,25", 10f, 200f, 680f, 230f),
                 ),
             ),
-        )
+        ).entries
         val first = receipt()
         assertEquals(listOf(Recognition.Unknown, Recognition.Unknown), first.map { it.recognition })
         // The line is a pack of 6 bottles.
@@ -386,5 +391,100 @@ class PantryRepositoryTest {
         // Its expiry day counts when it comes first.
         repo.editItem(milk.id, "Milk", 1, day.plus(DatePeriod(days = 2)), fridge)
         assertEquals(day.plus(DatePeriod(days = 2)), repo.memory.value.useBy(repo.pantry.value.item(milk.id)!!))
+    }
+
+    @Test
+    fun anOpenedBoxIsUsedByTheAmountTakenAndTheUsualServingIsLearned() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        val pot = Measure(500.0, MeasureUnit.Gram)
+        repo.addItem("Yogurt", fridge, 1, boxed = true, size = pot)
+        val yogurt = repo.pantry.value.liveItems().single()
+        assertEquals(pot, yogurt.size)
+
+        val opened = repo.useOne(yogurt.id)!!
+        assertEquals(PantryAction.Opened("Yogurt"), opened.action)
+        assertEquals(yogurt.id to pot, opened.item to opened.leftAmount)
+        val used = repo.useAmount(yogurt.id, 100.0)!!
+        assertEquals(PantryAction.UsedAmount("Yogurt", Measure(100.0, MeasureUnit.Gram)), used.action)
+        assertEquals(Measure(400.0, MeasureUnit.Gram), used.leftAmount)
+        repo.useAmount(yogurt.id, 150.0)
+        assertEquals(listOf(100.0, 150.0), repo.food("Yogurt")?.servings)
+        assertEquals(250.0, repo.pantry.value.item(yogurt.id)?.left)
+
+        // The rest of it: finished, as a tap on its last one would.
+        assertEquals(PantryAction.Finished("Yogurt"), repo.useAmount(yogurt.id, 250.0)!!.action)
+        assertEquals(emptyList(), repo.pantry.value.liveItems())
+        repo.undo()
+        assertEquals(250.0, repo.pantry.value.item(yogurt.id)?.left)
+
+        // Known now, the size comes by itself next time.
+        repo.addItem("yogurt", fridge, 2, LocalDate(2026, 11, 1))
+        assertEquals(pot, repo.pantry.value.liveItems().single { it.expires != null }.size)
+    }
+
+    @Test
+    fun pricesGoInTheCostsAddedUpByProductGroupSublistAndShop() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        val pot = Measure(500.0, MeasureUnit.Gram)
+        repo.addItem("Yogurt intero", fridge, 2, boxed = true, size = pot, price = 398, shop = "Coop")
+        val first = repo.costs.value.livePurchases().single()
+        assertEquals(Triple(2, 398L, Measure(1000.0, MeasureUnit.Gram)), Triple(first.quantity, first.cents, first.amount))
+        assertEquals("Coop" to LocalDate(2026, 10, 14), first.shop to first.day)
+
+        // A receipt's prices come with it, less discounts, and its shop is learned from its header.
+        val review = repo.understandReceipt(
+            listOf(
+                listOf(
+                    OcrLine("COOP ALLEANZA 3.0", 10f, 0f, 400f, 30f),
+                    OcrLine("VIA ROMA 12", 10f, 50f, 300f, 80f),
+                    OcrLine("YOGURT INTERO 500G", 10f, 100f, 400f, 130f),
+                    OcrLine("1,99", 600f, 100f, 680f, 130f),
+                    OcrLine("SCONTO -0,50", 10f, 150f, 680f, 180f),
+                    OcrLine("TOTALE 1,49", 10f, 200f, 680f, 230f),
+                ),
+            ),
+        )
+        assertEquals(1.49 to "Coop Alleanza", review.total to review.shop)
+        val entry = review.entries.single()
+        assertEquals(1.49 to pot, entry.price to entry.size)
+        val (step, _) = repo.saveReceipt(listOf(entry.copy(name = "Yogurt intero", space = fridge)), shop = "Coop", shopRow = review.shopRow)
+        assertEquals(2, repo.costs.value.livePurchases().size)
+        assertEquals("Coop", repo.understandReceipt(listOf(listOf(OcrLine("COOP ALLEANZA 3.0", 10f, 0f, 400f, 30f)))).shop)
+        // Undone, the purchase goes with the food.
+        repo.undo(step!!)
+        assertEquals(1, repo.costs.value.livePurchases().size)
+        repo.redo()
+
+        // Like products, grouped once, count together; sublists and shops as known.
+        repo.addItem("Fiocchi di latte", fridge, price = 150, shop = "Lidl")
+        repo.addItem("Cottage cheese", fridge, price = 210, shop = "Lidl")
+        repo.setGroup("Cottage cheese", "Fiocchi di latte")
+        repo.setSublist("Yogurt intero", "Latticini")
+        repo.setSublist("Fiocchi di latte", "Latticini")
+        val costs = repo.costs.value
+        val memory = repo.memory.value
+        assertEquals(
+            listOf("Yogurt intero" to 547L, "Fiocchi di latte" to 360L),
+            costLines(costs, memory, CostGrouping.Group).map { it.name to it.cents },
+        )
+        assertEquals(listOf("Latticini" to 697L, "" to 210L), costLines(costs, memory, CostGrouping.Sublist).map { it.name to it.cents })
+        assertEquals(listOf("Coop" to 547L, "Lidl" to 360L), costLines(costs, memory, CostGrouping.Shop).map { it.name to it.cents })
+        val yogurt = costLines(costs, memory, CostGrouping.Product).first()
+        // 3 pots for 5,47 €: 1,82 € each, 3,65 € a kilogram; the last, 1,49 €, is 25% below the 1,99 € before.
+        assertEquals(Triple(182L, 365L, MeasureUnit.Gram), Triple(yogurt.centsPerPiece, yogurt.centsPerThousand, yogurt.unit))
+        assertEquals(-0.25, yogurt.lastChange!!, 0.01)
+
+        // A purchase can be put right, or deleted; either can be undone.
+        val lidl = repo.costs.value.livePurchases().first { it.food == "Cottage cheese" }
+        repo.editPurchase(lidl.id, 1, 199, lidl.day, "Lidl", null)
+        assertEquals(199L, repo.costs.value.livePurchases().first { it.id == lidl.id }.cents)
+        repo.deletePurchase(lidl.id)
+        assertEquals(3, repo.costs.value.livePurchases().size)
+        assertEquals(PantryAction.DeletedPurchase("Cottage cheese"), repo.undo())
+        assertEquals(4, repo.costs.value.livePurchases().size)
     }
 }

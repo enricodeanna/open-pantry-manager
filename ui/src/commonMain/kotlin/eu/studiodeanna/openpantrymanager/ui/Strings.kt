@@ -8,6 +8,7 @@ import eu.studiodeanna.openpantrymanager.EnglishMessages
 import eu.studiodeanna.openpantrymanager.ItalianMessages
 import eu.studiodeanna.openpantrymanager.Messages
 import eu.studiodeanna.openpantrymanager.checklist.ListAction
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
 import eu.studiodeanna.openpantrymanager.model.PantryAction
 import eu.studiodeanna.openpantrymanager.store.LanguageChoice
 import eu.studiodeanna.openpantrymanager.voice.VoiceAction
@@ -127,6 +128,58 @@ interface Strings {
     val inBoxes: String
     val inBoxesHelp: String
     val boxOpened: String
+    /** What one box holds. */
+    val packageSize: String
+    /** What is left in the opened boxes. */
+    val leftInBox: String
+    /** "350 g left", under an opened box's name. */
+    fun amountLeft(amount: String): String
+    val pricePaid: String
+    fun eachCosts(price: String): String
+    val shop: String
+    val price: String
+    /** Asked when some of an opened box is used. */
+    val howMuchUsed: String
+    fun asUsual(amount: String): String
+    val theRest: String
+    val use: String
+    val justOpened: String
+    fun usedAmount(name: String, left: String): String
+    fun totalMatches(total: String): String
+    fun totalDiffers(sum: String, total: String): String
+
+    // Numbers
+    /** An amount of money, given in cents: "1,82 €". */
+    fun money(cents: Long): String
+    /** The decimal separator: "," or ".". */
+    val decimal: Char
+
+    // Costs
+    val costs: String
+    val thisMonth: String
+    val lastMonth: String
+    val thisYear: String
+    val allTime: String
+    val byProduct: String
+    val byGroup: String
+    val bySublist: String
+    val byShop: String
+    fun spent(amount: String): String
+    val noCosts: String
+    fun perPiece(price: String): String
+    fun perThousand(price: String, unit: MeasureUnit): String
+    fun pieces(count: Int): String
+    fun lastChange(percent: Int): String
+    val unknownShop: String
+    val purchases: String
+    val groupWith: String
+    fun inGroup(group: String): String
+    fun inSublist(sublist: String): String
+    val ownGroup: String
+    val newGroup: String
+    val groupName: String
+    val purchase: String
+    val amountInAll: String
 
     // Expiry
     /** Short month names, January first. */
@@ -279,6 +332,10 @@ object EnglishStrings : Strings {
         is PantryAction.UsedOne -> "used one “${action.name}”"
         is PantryAction.UsedSome -> "used ${action.count} “${action.name}”"
         is PantryAction.Opened -> "opened “${action.name}”"
+        is PantryAction.UsedAmount -> "used ${measure(action.amount)} of “${action.name}”"
+        is PantryAction.AddedPurchase -> "added the price of “${action.name}”"
+        is PantryAction.EditedPurchase -> "changed the price of “${action.name}”"
+        is PantryAction.DeletedPurchase -> "deleted the price of “${action.name}”"
         is PantryAction.Finished -> "finished “${action.name}”"
         is PantryAction.DeletedFood -> "deleted “${action.name}”"
         is PantryAction.EditedFood -> "edited “${action.name}”"
@@ -382,8 +439,52 @@ object EnglishStrings : Strings {
     override val starMeansUsual = "★ is where it usually goes from here."
     override fun allOf(count: Int) = "All $count"
     override val inBoxes = "Comes in a box or packet"
-    override val inBoxesHelp = "Tapping its number opens one; the next tap finishes it."
+    override val inBoxesHelp = "Tapping its number opens one; the next tap finishes it, or, with what one holds given, asks how much you used."
     override val boxOpened = "Opened"
+    override val packageSize = "One holds"
+    override val leftInBox = "Left in it"
+    override fun amountLeft(amount: String) = "$amount left"
+    override val pricePaid = "Price paid, for all"
+    override fun eachCosts(price: String) = "$price each"
+    override val shop = "Shop"
+    override val price = "Price"
+    override val howMuchUsed = "How much did you use?"
+    override fun asUsual(amount: String) = "As usual: $amount"
+    override val theRest = "All the rest"
+    override val use = "Use"
+    override val justOpened = "Only opened"
+    override fun usedAmount(name: String, left: String) = "$name: $left left"
+    override fun totalMatches(total: String) = "Total $total, as on the receipt."
+    override fun totalDiffers(sum: String, total: String) = "The prices add up to $sum, the receipt says $total: check them."
+
+    override fun money(cents: Long) = (if (cents < 0) "-" else "") + "€" + (kotlin.math.abs(cents) / 100) + "." + (kotlin.math.abs(cents) % 100).toString().padStart(2, '0')
+    override val decimal = '.'
+
+    override val costs = "Costs"
+    override val thisMonth = "This month"
+    override val lastMonth = "Last month"
+    override val thisYear = "This year"
+    override val allTime = "All"
+    override val byProduct = "Products"
+    override val byGroup = "Groups"
+    override val bySublist = "Sublists"
+    override val byShop = "Shops"
+    override fun spent(amount: String) = "Spent: $amount"
+    override val noCosts = "No prices yet. Prices read from receipts, or typed when adding food, show here."
+    override fun perPiece(price: String) = "$price each"
+    override fun perThousand(price: String, unit: MeasureUnit) = if (unit == MeasureUnit.Gram) "$price/kg" else "$price/l"
+    override fun pieces(count: Int) = if (count == 1) "1 piece" else "$count pieces"
+    override fun lastChange(percent: Int) = "last " + (if (percent > 0) "+" else "") + "$percent%"
+    override val unknownShop = "Shop not known"
+    override val purchases = "Purchases"
+    override val groupWith = "Group with…"
+    override fun inGroup(group: String) = "Group: $group"
+    override fun inSublist(sublist: String) = "Sublist: $sublist"
+    override val ownGroup = "On its own"
+    override val newGroup = "New group"
+    override val groupName = "Group name"
+    override val purchase = "Purchase"
+    override val amountInAll = "Weight or volume, in all"
 
     override val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     override fun expired(daysAgo: Int) = if (daysAgo == 1) "Expired yesterday" else "Expired $daysAgo days ago"
@@ -557,6 +658,10 @@ object ItalianStrings : Strings {
         is PantryAction.UsedOne -> "consumo di “${action.name}”"
         is PantryAction.UsedSome -> "consumo di ${action.count} “${action.name}”"
         is PantryAction.Opened -> "apertura di “${action.name}”"
+        is PantryAction.UsedAmount -> "consumo di ${measure(action.amount)} di “${action.name}”"
+        is PantryAction.AddedPurchase -> "aggiunta del prezzo di “${action.name}”"
+        is PantryAction.EditedPurchase -> "modifica del prezzo di “${action.name}”"
+        is PantryAction.DeletedPurchase -> "eliminazione del prezzo di “${action.name}”"
         is PantryAction.Finished -> "esaurimento di “${action.name}”"
         is PantryAction.DeletedFood -> "eliminazione di “${action.name}”"
         is PantryAction.EditedFood -> "modifica di “${action.name}”"
@@ -662,8 +767,53 @@ object ItalianStrings : Strings {
     override val starMeansUsual = "★ è dove va di solito da qui."
     override fun allOf(count: Int) = "Tutti e $count"
     override val inBoxes = "In confezione (scatola, pacco…)"
-    override val inBoxesHelp = "Toccando il numero si apre una confezione; il tocco dopo la segna come finita."
+    override val inBoxesHelp =
+        "Toccando il numero si apre una confezione; il tocco dopo la segna come finita o, se ne dai il contenuto, chiede quanto ne hai usato."
     override val boxOpened = "Aperta"
+    override val packageSize = "Contenuto"
+    override val leftInBox = "Rimasto"
+    override fun amountLeft(amount: String) = "restano $amount"
+    override val pricePaid = "Prezzo pagato, in tutto"
+    override fun eachCosts(price: String) = "$price l'uno"
+    override val shop = "Negozio"
+    override val price = "Prezzo"
+    override val howMuchUsed = "Quanto ne hai usato?"
+    override fun asUsual(amount: String) = "Il solito: $amount"
+    override val theRest = "Tutto il resto"
+    override val use = "Usa"
+    override val justOpened = "L'ho solo aperto"
+    override fun usedAmount(name: String, left: String) = "$name: restano $left"
+    override fun totalMatches(total: String) = "Totale $total, come sullo scontrino."
+    override fun totalDiffers(sum: String, total: String) = "I prezzi fanno $sum, lo scontrino dice $total: controllali."
+
+    override fun money(cents: Long) = (if (cents < 0) "-" else "") + (kotlin.math.abs(cents) / 100) + "," + (kotlin.math.abs(cents) % 100).toString().padStart(2, '0') + " €"
+    override val decimal = ','
+
+    override val costs = "Spese"
+    override val thisMonth = "Questo mese"
+    override val lastMonth = "Mese scorso"
+    override val thisYear = "Quest'anno"
+    override val allTime = "Sempre"
+    override val byProduct = "Prodotti"
+    override val byGroup = "Gruppi"
+    override val bySublist = "Sottoliste"
+    override val byShop = "Negozi"
+    override fun spent(amount: String) = "Speso: $amount"
+    override val noCosts = "Ancora nessun prezzo. Qui compaiono i prezzi letti dagli scontrini o scritti aggiungendo un alimento."
+    override fun perPiece(price: String) = "$price l'uno"
+    override fun perThousand(price: String, unit: MeasureUnit) = if (unit == MeasureUnit.Gram) "$price/kg" else "$price/l"
+    override fun pieces(count: Int) = if (count == 1) "1 pezzo" else "$count pezzi"
+    override fun lastChange(percent: Int) = "ultimo " + (if (percent > 0) "+" else "") + "$percent%"
+    override val unknownShop = "Negozio sconosciuto"
+    override val purchases = "Acquisti"
+    override val groupWith = "Raggruppa con…"
+    override fun inGroup(group: String) = "Gruppo: $group"
+    override fun inSublist(sublist: String) = "Sottolista: $sublist"
+    override val ownGroup = "Da solo"
+    override val newGroup = "Nuovo gruppo"
+    override val groupName = "Nome del gruppo"
+    override val purchase = "Acquisto"
+    override val amountInAll = "Peso o volume, in tutto"
 
     override val months = listOf("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic")
     override fun expired(daysAgo: Int) = if (daysAgo == 1) "Scaduto ieri" else "Scaduto da $daysAgo giorni"

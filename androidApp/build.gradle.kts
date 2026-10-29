@@ -15,8 +15,8 @@ android {
         applicationId = "eu.studiodeanna.openpantrymanager"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 9
-        versionName = "1.0.0"
+        versionCode = 10
+        versionName = "1.1.0"
     }
 
     buildTypes {

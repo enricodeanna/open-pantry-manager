@@ -25,7 +25,7 @@ import androidx.navigation.compose.rememberNavController
 import eu.studiodeanna.openpantrymanager.Messages
 import eu.studiodeanna.openpantrymanager.PantryRepository
 import eu.studiodeanna.openpantrymanager.checklist.Item
-import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
+import eu.studiodeanna.openpantrymanager.ReceiptReview
 import kotlinx.coroutines.launch
 
 /**
@@ -63,7 +63,7 @@ fun PantryApp(
                 val scope = rememberCoroutineScope()
                 // Shared by the screens, so a message from one (receipt saved) shows on the next.
                 val snackbars = remember { SnackbarHostState() }
-                var receipt by remember { mutableStateOf<List<ReceiptEntry>?>(null) }
+                var receipt by remember { mutableStateOf<ReceiptReview?>(null) }
                 /** The shopping list's items under review, when [receipt] was made of them rather than read on a receipt. */
                 var fromList by remember { mutableStateOf<List<Item>?>(null) }
                 // Opened from a shortcut: back to the pantry, which searches or listens; or on to the camera.
@@ -81,12 +81,13 @@ fun PantryApp(
                             repository,
                             snackbars,
                             onShopping = { nav.navigate("shopping") },
+                            onCosts = { nav.navigate("costs") },
                             onScan = scanner?.let { { nav.navigate("photos") } },
                             voice = voice,
                             reminders = reminders,
                             onPutAway = { items ->
                                 fromList = items
-                                receipt = repository.entriesFor(items)
+                                receipt = ReceiptReview(repository.entriesFor(items))
                                 nav.navigate("receipt")
                             },
                             shortcut = shortcut?.takeIf { it != Shortcut.Receipt },
@@ -108,12 +109,15 @@ fun PantryApp(
                             },
                         )
                     }
+                    composable("costs") {
+                        CostsScreen(repository, onBack = { nav.popBackStack() })
+                    }
                     composable("shopping") {
                         ShoppingScreen(repository, onBack = { nav.popBackStack() })
                     }
                     composable("receipt") {
-                        val entries = receipt
-                        if (entries == null) {
+                        val review = receipt
+                        if (review == null) {
                             // After the app was closed in the middle of a review: nothing left to review.
                             LaunchedEffect(Unit) { nav.popBackStack() }
                             return@composable
@@ -121,13 +125,17 @@ fun PantryApp(
                         val items = fromList
                         ReceiptScreen(
                             repository,
-                            entries,
+                            review,
                             // The entries stay until the next scan replaces them: clearing them here would
                             // make this screen leave a second time, taking the pantry with it.
                             onBack = { nav.popBackStack() },
                             title = if (items != null) strings.putAwayTitle else strings.receipt,
                             closeLabel = if (items != null) strings.close else strings.discardReceipt,
-                            save = if (items != null) { e, bought -> repository.putAwayFromList(e, items, bought) } else repository::saveReceipt,
+                            save = if (items != null) {
+                                { e, bought, shop -> repository.putAwayFromList(e, items, bought, shop) }
+                            } else {
+                                { e, bought, shop -> repository.saveReceipt(e, bought, shop, review.shopRow) }
+                            },
                             onSaved = { count, step ->
                                 nav.popBackStack()
                                 scope.launch {

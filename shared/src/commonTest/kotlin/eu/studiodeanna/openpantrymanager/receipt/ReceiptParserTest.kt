@@ -1,5 +1,8 @@
 package eu.studiodeanna.openpantrymanager.receipt
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
+import eu.studiodeanna.openpantrymanager.costs.sizeIn
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -31,8 +34,10 @@ class ReceiptParserTest {
         assertEquals(
             listOf(
                 ReceiptLine("LATTE P.S. ESSELUNGA 1L", 1, 1.15),
-                ReceiptLine("BANANE", 1, 1.89),
-                ReceiptLine("YOGURT MAGRO BIANCO", 2, 1.78),
+                // Weighed: 1,234 kg at 1,53 €/kg makes its 1,89.
+                ReceiptLine("BANANE", 1, 1.89, kilograms = 1.234),
+                // Less its discount of 0,30.
+                ReceiptLine("YOGURT MAGRO BIANCO", 2, 1.48),
                 ReceiptLine("FAGE TOTAL 0% 170G", 1, 1.99),
                 ReceiptLine("SHOPPER BIO", 1, 0.10),
             ),
@@ -54,7 +59,7 @@ class ReceiptParserTest {
             listOf(
                 ReceiptLine("Latte intero UHT", 1, 0.99),
                 ReceiptLine("Mozzarella", 2, 2.58),
-                ReceiptLine("Banane", 1, 1.29),
+                ReceiptLine("Banane", 1, 1.29, kilograms = 0.846),
             ),
             lines,
         )
@@ -169,5 +174,40 @@ class ReceiptParserTest {
         val first = listOf("PANE 1,20", "YOGURT 0,89", "YOGURT 0,89")
         val second = listOf("YOGURT 0,89", "YOGURT 0,89", "MELE 2,10")
         assertEquals(listOf("PANE 1,20", "YOGURT 0,89", "YOGURT 0,89", "MELE 2,10"), ReceiptParser.joinPages(listOf(first, second)))
+    }
+
+    @Test
+    fun theTotalAndTheShopAreReadToo() {
+        val receipt = ReceiptParser.readRows(
+            listOf(
+                "COOP ALLEANZA 3.0 SOC. COOP.",
+                "VIA ROMA 12 - UDINE",
+                "P.IVA 01255720169",
+                "DOCUMENTO COMMERCIALE",
+                "MELE GOLDEN",
+                "0,846 kg x 1,52 €/kg  1,29",
+                "YOGURT INTERO 500G  1,99",
+                "SCONTO  -0,50",
+                "TOTALE COMPLESSIVO  2,78",
+            ),
+        )
+        assertEquals(
+            listOf(ReceiptLine("MELE GOLDEN", 1, 1.29, kilograms = 0.846), ReceiptLine("YOGURT INTERO 500G", 1, 1.49)),
+            receipt.lines,
+        )
+        assertEquals(2.78, receipt.total)
+        assertEquals("Coop Alleanza", receipt.shop)
+    }
+
+    @Test
+    fun packageSizesAreReadFromDescriptions() {
+        assertEquals(Measure(500.0, MeasureUnit.Gram), sizeIn("YOGURT INTERO 500G"))
+        assertEquals(Measure(1000.0, MeasureUnit.Millilitre), sizeIn("LATTE P.S. ESSELUNGA 1L"))
+        assertEquals(Measure(1500.0, MeasureUnit.Millilitre), sizeIn("ACQUA FRIZZ. 6X1,5L"))
+        assertEquals(Measure(125.0, MeasureUnit.Gram), sizeIn("YOGURT 4X125G"))
+        assertEquals(Measure(1000.0, MeasureUnit.Gram), sizeIn("ZUCCHERO1KG"))
+        assertEquals(Measure(330.0, MeasureUnit.Millilitre), sizeIn("BIRRA 33 CL"))
+        assertEquals(null, sizeIn("BANANE"))
+        assertEquals(null, sizeIn("SCONTO 10%"))
     }
 }

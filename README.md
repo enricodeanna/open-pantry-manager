@@ -49,10 +49,37 @@ with the same name and expiry, a square without its lid, and "Opened today", "Op
 name, before the closed ones. The next tap on it means it is finished. Boxes of a food opened the same day
 in the same space are counted together. The edit dialog can mark a box opened or closed again.
 
+**What is left of a box.** A box can say what it holds ("500 g", "1 l"): typed when it is added, read
+from the receipt ("YOGURT GRECO 500G"), or remembered from last time. Then the first tap opens it and
+asks how much was used, and so does each tap after: the amount used usually ("Il solito: 150 g", the
+middle of the last five times), 50, 100 or 200 g (ml), *All the rest*, or any amount typed. The row says
+"restano 350 g", and the lidless square fills to show how full the box still is; the last of it takes the
+box out of the pantry. Boxes with a size opened the same day are listed one by one, each with what is
+left of it. The edit dialog sets the size, and what is left. By voice: "ho mangiato 100 grammi di yogurt",
+"un etto di prosciutto", "I drank 200 ml of milk".
+
 The app learns how long an opened box of each food lasts, from the day it was opened to the day it was
 finished. Once a food has been finished from an opened box twice, its opened box says "Aperto da 3
 giorni (di solito dura 4 giorni)", is listed by that day rather than its expiry day when that comes
 first, and goes under *Use soon* (and in the reminder) as that day nears.
+
+**Costs.** What food cost is kept apart from the pantry's lists, in Menu → *Costs*. Prices come from
+receipts (read with them, less the discounts printed under each product, and checked against the
+receipt's total), from the *Add food* dialog (*Price paid, for all*, and the shop), and from putting away
+what was ticked on the shopping list. Each purchase keeps how many, what was paid, the day, the shop, and
+the weight or volume in all where it is known: from the box's size, or from the scales ("0,846 kg x 1,52
+€/kg"). The screen adds them up over this month, last month, this year or all time, in four ways:
+
+- by **product**: what was spent, how many, the price of one, of a kilogram or litre, and how the last
+  price compares with the ones before ("ultimo -8%");
+- by **group** of like products: foods that go on the shopping list under the same name are one group
+  ("Latte p.s. Friuli" and "Latte intero" are "Latte"), and any product can be grouped with others by
+  hand ("Cottage cheese" with "Fiocchi di latte"), for its past costs too;
+- by the shopping list's **sublist** each food goes in, which a product's page can set, for the list too;
+- by **shop**: the shop a receipt comes from is read from its top, as the user called it last time.
+
+A product's page shows its price shop by shop, and its purchases, each of which can be put right or
+deleted (with Undo). Purchases made before 1.1.0 had no prices kept, so costs start from then.
 
 **Running out.** Food goes on the shopping list (if one is linked, and the setting is on) when none of it
 is left unopened: when the last one is finished, and for boxes when the last closed one is opened, not
@@ -149,8 +176,10 @@ with the pantry when it is shared:
   from the day of purchase ("As usual: 21 Oct"), so that one odd date does not pull it away. A receipt
   has one day of purchase for all its food; changing it moves the dates the app suggested, not those
   set by hand;
-- whether each food comes in boxes, as last said, and how long an opened box of it lasts (the middle of
-  the last five times);
+- whether each food comes in boxes, as last said, what one holds, how much of it is used at a time, and
+  how long an opened box of it lasts (the middle of the last five times);
+- the group of like products each food's costs count under, when set by hand;
+- which shop a receipt's top names, as the user called it ("Coop" for "COOP ALLEANZA 3.0");
 - which items of the shopping list, ticked as bought, were put away or let go, so they are not offered
   again;
 - what each food is called on the shopping list ("Latte" for "Latte p.s. Friuli"), and in which sublist;
@@ -172,14 +201,19 @@ The reader (`shared/.../ocr`) is PaddleOCR's PP-OCRv6 "small": one network finds
 another reads them. The steps around the networks, from PaddleOCR and RapidOCR, are written in Kotlin,
 so that desktop and iOS can use them; ONNX Runtime runs the networks. `ReceiptParser` then puts the
 description and price columns back into rows (undoing the photo's tilt), keeps the product rows, and
-drops headers, totals, VAT, weights and discounts; "2 x 0,89" rows give the quantity of the product
-whose price they add up to. It knows Italian receipts best.
+drops VAT; "2 x 0,89" rows give the quantity of the product whose price they add up to, "0,846 kg x 1,52
+€/kg" rows the weight of the product whose price they make, and discounts ("SCONTO -0,40") lower the price
+of the product above them (a discount larger than the price is misread: a crossed 0 read as 8 is tried).
+The rows above the products give the shop; the total is read to check the prices against. It knows
+Italian receipts best.
 
 Each line is then *known* (you said what it is before), *probable* (it reads almost like a known line,
 or names a known food: "LATTE P.S. 1L" is Latte), *unknown* (the name is tidied up from the receipt:
 "PROSC.CRUDO S.DANIELE" becomes "Prosc crudo daniele"), or *left out as last time*. The review screen
-lists the unsure ones first and asks what they are and where they go; everything can be changed before
-saving. Saving puts the food away and learns from every line. A food can go in a space the pantry does not
+lists the unsure ones first and asks what they are and where they go; each row shows its price and what
+one holds, and the top the shop and whether the prices add up to the total ("I prezzi fanno 11,14 €, lo
+scontrino dice 11,64 €: controllali"). Everything can be changed before saving. Saving puts the food
+away, and its prices in the costs, and learns from every line. A food can go in a space the pantry does not
 have yet: **New space** among the spaces names one there and then.
 
 **The shopping list** is a list of Open Check Lists, kept in the same file by both apps. In Open Check
@@ -221,9 +255,15 @@ and folded spaces stay each phone's own.
 
 From format 2 (version 0.4.0) items carry the day they were bought, from format 3 (0.6.0) the memory
 carries the phrases taught to voice commands, from format 4 (0.7.0) items come in boxes, opened or not,
-and from format 5 (1.0.0) the memory knows how long opened boxes last and which items of the shopping
-list were put away: a phone with an older version refuses the file, asking to be updated, rather than
-dropping them. Every phone sharing a pantry needs updating, then.
+from format 5 (1.0.0) the memory knows how long opened boxes last and which items of the shopping list
+were put away, and from format 6 (1.1.0) boxes have a size and what is left of them, and the memory has
+sizes, servings, groups of products and shops: a phone with an older version refuses the file, asking to
+be updated, rather than dropping them. Every phone sharing a pantry needs updating, then.
+
+The costs are shared too, in a file of their own next to the pantry's (`Dispensa.costs` by
+`Dispensa.pantry`): their history only grows, and the pantry's file, synced at every change, does not
+carry it. They sync when they change and when the app is opened. A pantry shared as a single file, not a
+folder, keeps its costs on each phone.
 
 The file ends in `.pantry`, not `.json`, and is marked as a pantry inside: Open Check Lists takes every
 `.json` file in a shared folder for a list, and an empty pantry reads as an empty list there. Each app
@@ -249,8 +289,9 @@ Receipts are read in Latin script only (see below).
 
 Everything is in the app's files directory, as JSON: `pantry.json` (spaces and food, stamped per change
 and merged like an Open Check Lists list), `memory.json` (with a stamp per learned thing),
-`settings.json`, `device.json` (this device's id, the linked list and the shared pantry) and
-`shopping-list.json` (this device's copy of the list). The shared pantry's file holds `pantry.json` and
+`settings.json`, `device.json` (this device's id, the linked list and the shared pantry),
+`shopping-list.json` (this device's copy of the list) and `costs.json` (the purchases, stamped per
+change). The shared pantry's file holds `pantry.json` and
 `memory.json` together (`sync/SharedPantry.kt`). A `pantry.json` this version cannot read is kept
 aside as `pantry-unreadable-<time>.json` instead of being overwritten. Files are made into text and
 written away from the thread that draws the screen; edits made quickly one after another are written

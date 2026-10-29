@@ -18,8 +18,23 @@ data class OcrLine(
     val angle: Float = 0f,
 )
 
-/** A product line of a receipt: its description as printed, how many were bought, and its price. */
-data class ReceiptLine(val text: String, val quantity: Int = 1, val price: Double? = null)
+/**
+ * A product line of a receipt: its description as printed, how many were bought, and its price, less
+ * the discounts printed for it; for food sold by weight, the [kilograms] weighed.
+ */
+data class ReceiptLine(val text: String, val quantity: Int = 1, val price: Double? = null, val kilograms: Double? = null)
+
+/**
+ * A receipt as read: its product lines, the [total] it prints, to check them against, and its [header],
+ * the rows above the products, which name the shop.
+ */
+data class Receipt(val lines: List<ReceiptLine>, val total: Double? = null, val header: String = "") {
+    /** The row of the header that names the shop: the first row of words that is not an address or a tax number. */
+    val shopRow: String? get() = header.split('\n').firstOrNull(::namesShop)
+
+    /** The shop's name as the header prints it, tidied. */
+    val shop: String? get() = shopRow?.let(::tidyShop)
+}
 
 /**
  * Turns what a text recognizer saw on a shop receipt into its product lines. Receipts print the
@@ -33,7 +48,10 @@ object ReceiptParser {
      * The product lines of a receipt taken in several photos, top to bottom ([pages]). The rows a photo
      * repeats from the one before are taken once.
      */
-    fun parsePages(pages: List<List<OcrLine>>): List<ReceiptLine> = parseRows(joinPages(pages.map(::rows)))
+    fun parsePages(pages: List<List<OcrLine>>): List<ReceiptLine> = readPages(pages).lines
+
+    /** The receipt taken in several photos, top to bottom ([pages]): its products, total and header. */
+    fun readPages(pages: List<List<OcrLine>>): Receipt = readRows(joinPages(pages.map(::rows)))
 
     /**
      * The printed rows of photos taken one after another down a long receipt, without the rows each
@@ -123,16 +141,26 @@ object ReceiptParser {
     }
 
     /** The product lines among printed rows. */
-    fun parseRows(rows: List<String>): List<ReceiptLine> {
+    fun parseRows(rows: List<String>): List<ReceiptLine> = readRows(rows).lines
+
+    /** The receipt the printed rows make: its product lines, the total it prints, and the rows above the products. */
+    fun readRows(rows: List<String>): Receipt {
         val found = mutableListOf<Found>()
         val quantities = mutableListOf<Pair<Int, Quantity>>()
+        val weights = mutableListOf<Pair<Int, Weight>>()
+        val header = mutableListOf<String>()
+        var total: Double? = null
         // A description whose price comes on the next row.
         var pendingName: String? = null
         for (raw in rows) {
             val row = raw.trim().replace(Regex("\\s+"), " ")
             if (row.isEmpty()) continue
             val upper = row.uppercase()
-            if (END.containsMatchIn(upper)) break
+            if (END.containsMatchIn(upper)) {
+                if (TOTAL.containsMatchIn(upper)) total = PRICE_AT_END.find(row)?.groupValues?.get(1)?.let(::price)
+                break
+            }
+            if (found.isEmpty() && quantities.isEmpty() && PRICE_AT_END.find(row) == null) header += row
             val quantity = QUANTITY.find(upper)
             val name = pendingName
             pendingName = null
@@ -148,7 +176,21 @@ object ReceiptParser {
                         else -> quantities += found.size to Quantity(count, unit)
                     }
                 }
-                WEIGHT.containsMatchIn(upper) || SKIP.containsMatchIn(upper) -> Unit
+                WEIGHT.containsMatchIn(upper) -> {
+                    val weighed = KILOGRAMS.find(upper)
+                    val kilograms = weighed?.groupValues?.get(1)?.let(::price)?.takeIf { it > 0 } ?: continue
+                    val perKilogram = PER_KILOGRAM.find(upper)
+                    // A price after the price per kilogram is the product's own.
+                    val price = PRICE_AT_END.find(upper)
+                        ?.takeIf { it.range.first > maxOf(weighed.range.last, perKilogram?.range?.last ?: 0) }
+                        ?.groupValues?.get(1)?.let(::price)
+                    when {
+                        // "BANANE" then "0,846 kg x 1,52 €/kg  1,29": the row before is the product.
+                        name != null && price != null -> found += Found(name, 1, price, kilograms)
+                        else -> weights += found.size to Weight(kilograms, perKilogram?.groupValues?.get(1)?.let(::price))
+                    }
+                }
+                SKIP.containsMatchIn(upper) -> Unit
                 else -> {
                     val priceMatch = PRICE_AT_END.find(row)
                     if (priceMatch == null) {
@@ -158,7 +200,9 @@ object ReceiptParser {
                     val amount = price(priceMatch.groupValues[1])
                     val description = row.substring(0, priceMatch.range.first).replace(VAT, "").trim()
                     when {
-                        amount == null || amount < 0 || DISCOUNT.containsMatchIn(upper) -> Unit
+                        amount == null -> Unit
+                        // A discount lowers the price of the product just before it.
+                        amount < 0 || DISCOUNT.containsMatchIn(upper) -> found.lastOrNull()?.let { discount(it, priceMatch.groupValues[1]) }
                         letters(description) >= 2 -> found += Found(description, 1, amount)
                         // A price alone on its row belongs to the description just before it.
                         description.isBlank() && name != null -> found += Found(name, 1, amount)
@@ -179,12 +223,43 @@ object ReceiptParser {
             }
             target?.count = quantity.count
         }
-        return found.map { ReceiptLine(it.text, it.count, it.price) }
+        // "0,846 kg x 1,52 €/kg" belongs likewise to the product whose price it makes.
+        for ((at, weight) in weights) {
+            val before = found.getOrNull(at - 1)
+            val after = found.getOrNull(at)
+            val made = weight.perKilogram?.times(weight.kilograms)
+            // With the price per kilogram printed, only the product it makes the price of; else the one before.
+            val target = when {
+                made == null -> before
+                after?.price?.let { abs(it - made) < 0.02 } == true -> after
+                before?.price?.let { abs(it - made) < 0.02 } == true -> before
+                else -> null
+            }
+            target?.kilograms = weight.kilograms
+        }
+        return Receipt(
+            found.map { ReceiptLine(it.text, it.count, it.price?.let { p -> kotlin.math.round(p * 100) / 100 }, it.kilograms) },
+            total,
+            header.joinToString("\n"),
+        )
     }
 
-    private class Found(val text: String, var count: Int, val price: Double?)
+    private class Found(val text: String, var count: Int, var price: Double?, var kilograms: Double? = null)
+
+    /**
+     * Lowers [product]'s price by the discount printed as [text]. A discount larger than the price is
+     * misread: a crossed zero read as an 8 ("-8,10" for "-0,10") is tried, else it is left out, and the
+     * receipt's total shows something is amiss.
+     */
+    private fun discount(product: Found, text: String) {
+        val price = product.price ?: return
+        val off = listOfNotNull(price(text), price(text.replace('8', '0'))).map(::abs).firstOrNull { it < price } ?: return
+        product.price = price - off
+    }
 
     private class Quantity(val count: Int, val unit: Double?)
+
+    private class Weight(val kilograms: Double, val perKilogram: Double?)
 
     private fun letters(text: String) = text.count { it.isLetter() }
 
@@ -211,6 +286,11 @@ object ReceiptParser {
 
     /** "0,846 kg x 1,52 €/kg": the weight of a product sold by weight. */
     private val WEIGHT = Regex("""\d[.,]\d{3}\s*KG|[€E](?:UR)?\s*/\s*KG|\bKG\s*[X×*]""")
+    private val KILOGRAMS = Regex("""(\d{1,3}[.,]\d{3})\s*KG""")
+    private val PER_KILOGRAM = Regex("""(\d{1,4}[.,]\d{2})\s*(?:€|EUR|E)?\s*/\s*KG""")
+
+    /** The row of the total to pay, after which no products follow. */
+    private val TOTAL = Regex("""^TOTAL[EI]?\b(?!.*\bIVA\b)""")
 
     /** A VAT column just before the price: "4%", "10 %", "22,00%". */
     private val VAT = Regex("""\s\d{1,2}(?:[.,]\d{1,2})?\s?%\s*$""")
@@ -247,3 +327,27 @@ fun guessName(receiptText: String): String {
     val text = words.joinToString(" ").lowercase()
     return text.replaceFirstChar { it.uppercase() }
 }
+
+/** Whether a header row names the shop: words, not an address, a tax number, a phone or the receipt's own title. */
+private fun namesShop(row: String): Boolean {
+    val upper = row.uppercase()
+    return row.count { it.isLetter() } >= 3 && row.count { it.isDigit() } <= 2 && !NOT_SHOP.containsMatchIn(upper)
+}
+
+/** A shop's name as printed, without its company form, in title case: "COOP ALLEANZA 3.0 SOC. COOP." is "Coop Alleanza". */
+private fun tidyShop(row: String): String? {
+    val words = row.replace(COMPANY, " ").replace(Regex("""[^\p{L}\s'&]"""), " ").split(Regex("\\s+"))
+        .filter { word -> word.count { it.isLetter() } >= 2 }
+    return words.joinToString(" ") { word -> word.lowercase().replaceFirstChar { it.uppercase() } }.takeIf { it.isNotBlank() }
+}
+
+/** Header rows that do not name the shop. */
+private val NOT_SHOP = Regex(
+    """\bVIA\b|\bV\.LE\b|\bVIALE\b|\bPIAZZA\b|\bP\.ZZA\b|\bCORSO\b|\bLOC\.|\bP\.?\s?IVA\b|\bPARTITA\b|\bC\.?F\.?\b|""" +
+        """\bTEL\b|\bFAX\b|\bDOCUMENTO\b|\bCOMMERCIALE\b|\bSCONTRINO\b|\bFISCALE\b|\bVENDITA\b|\bDESCRIZIONE\b|""" +
+        """\bPREZZO\b|\bEURO\b|\bBENVENUT|\bGRAZIE\b|\bWWW\b|\bCASSA\b|\bCAP\b""",
+)
+
+/** The company forms a shop's name is printed with. */
+private val COMPANY = Regex("""(?i)\bS\.?\s?P\.?\s?A\.?(?!\p{L})|\bS\.?\s?R\.?\s?L\.?(?!\p{L})|\bSOC(?:IETA'?)?\.?\s?COOP(?:ERATIVA)?\.?|\bS\.?\s?C\.?\s?A\.?\s?R\.?\s?L\.?(?!\p{L})|\bS\.?\s?N\.?\s?C\.?(?!\p{L})|\d+[.,]\d+""")
+

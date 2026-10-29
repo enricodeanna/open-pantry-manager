@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.model
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
 
@@ -16,10 +17,11 @@ data class PantryDocument(
 ) {
     companion object {
         /**
-         * 2: items have the day they were bought. 3: items come in boxes, opened or not. An older app
-         * refuses the file rather than dropping what it does not know.
+         * 2: items have the day they were bought. 3: items come in boxes, opened or not. 4: boxes have
+         * a size, and an opened one how much is left. An older app refuses the file rather than dropping
+         * what it does not know.
          */
-        const val FORMAT = 3
+        const val FORMAT = 4
     }
 }
 
@@ -54,6 +56,10 @@ data class PantryItem(
     val boxed: Boolean = false,
     /** The day these boxes were opened; null while they are closed. */
     val opened: LocalDate? = null,
+    /** What one box holds, by weight or volume ("500 g"), if known. */
+    val size: Measure? = null,
+    /** For opened boxes of a known [size]: how much is left in them, in its unit. */
+    val left: Double? = null,
     val added: Long,
     override val at: Long,
     override val by: String,

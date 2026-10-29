@@ -16,8 +16,10 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
+import eu.studiodeanna.openpantrymanager.costs.livePurchases
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -204,5 +206,26 @@ class PantrySharingTest {
         assertEquals(before, pantryShare.content)
         assertTrue(runCatching { ListCodec.decode(before!!) }.isSuccess, "an empty pantry of format 1 does parse as a list")
         assertTrue(runCatching { ListCodec.decode(SharedPantryCodec.encode(SharedPantry())) }.isFailure, "a newer format does not")
+    }
+
+    @Test
+    fun costsAreSharedInAFileOfTheirOwnNextToThePantry() = runTest {
+        val a = phone()
+        val fridge = a.addSpace("Fridge")
+        a.addItem("Latte", fridge, 1, price = 129, shop = "Coop")
+        a.sharePantry(cloud.link, "Dispensa")
+        a.syncCosts()
+        assertEquals(setOf("Dispensa.pantry", "Dispensa.costs"), cloud.fileNames)
+        // The pantry's file, synced at every change, does not carry them.
+        assertFalse(cloud.file("Dispensa.pantry")!!.contains("\"cents\""))
+
+        val b = phone()
+        b.sharePantry(cloud.link, "Dispensa")
+        b.syncCosts()
+        assertEquals(listOf(129L), b.costs.value.livePurchases().map { it.cents })
+        b.addItem("Pane", b.space("Fridge"), price = 250)
+        b.syncCosts()
+        a.syncCosts()
+        assertEquals(setOf(129L, 250L), a.costs.value.livePurchases().map { it.cents }.toSet())
     }
 }

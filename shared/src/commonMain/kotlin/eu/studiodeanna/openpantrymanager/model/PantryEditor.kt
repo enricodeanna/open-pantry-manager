@@ -1,5 +1,7 @@
 package eu.studiodeanna.openpantrymanager.model
 
+import eu.studiodeanna.openpantrymanager.costs.CostsDocument
+import eu.studiodeanna.openpantrymanager.costs.Measure
 import kotlinx.datetime.LocalDate
 
 /**
@@ -50,9 +52,9 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
     }
 
     /**
-     * Puts [quantity] of [name] in [space], in closed boxes if [boxed]. If the space already holds that
-     * food with the same expiry day, not opened, it is counted there instead of listed twice. Returns the
-     * document and the item's id.
+     * Puts [quantity] of [name] in [space], in closed boxes if [boxed], of [size] each if known. If the
+     * space already holds that food with the same expiry day and size, not opened, it is counted there
+     * instead of listed twice. Returns the document and the item's id.
      */
     fun addItem(
         doc: PantryDocument,
@@ -62,9 +64,10 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
         expires: LocalDate? = null,
         bought: LocalDate? = null,
         boxed: Boolean = false,
+        size: Measure? = null,
     ): Pair<PantryDocument, String> {
         val at = doc.stamp()
-        val same = doc.sameFood(name, space, expires, opened = null)
+        val same = doc.sameFood(name, space, expires, opened = null, size)
         if (same != null) {
             val counted = same.copy(
                 quantity = same.quantity + quantity,
@@ -75,13 +78,14 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
             )
             return doc.withItem(counted) to same.id
         }
-        val item = PantryItem(newId(), name.trim(), space, quantity.coerceAtLeast(1), expires, bought, boxed, added = now(), at = at, by = device)
+        val item = PantryItem(newId(), name.trim(), space, quantity.coerceAtLeast(1), expires, bought, boxed, size = size, added = now(), at = at, by = device)
         return doc.copy(items = doc.items + item) to item.id
     }
 
     /**
-     * Changes an item's name, quantity, expiry day and day it was bought, whether it comes in boxes
-     * and the day they were opened (null: closed); where it is changes with [moveItem]. Only boxes open.
+     * Changes an item's name, quantity, expiry day and day it was bought, whether it comes in boxes, the
+     * day they were opened (null: closed), their size and what is left of the opened ones; where it is
+     * changes with [moveItem]. Only boxes open, and only opened boxes of a known size have some left.
      */
     fun editItem(
         doc: PantryDocument,
@@ -92,19 +96,39 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
         bought: LocalDate?,
         boxed: Boolean = doc.item(id)?.boxed ?: false,
         opened: LocalDate? = doc.item(id)?.opened,
+        size: Measure? = doc.item(id)?.size,
+        left: Double? = doc.item(id)?.left,
     ): PantryDocument {
         val item = doc.item(id) ?: return doc
+        val count = quantity.coerceAtLeast(1)
+        val isOpened = opened != null && boxed
         val edited = item.copy(
             name = name.trim(),
-            quantity = quantity.coerceAtLeast(1),
+            quantity = count,
             expires = expires,
             bought = bought,
             boxed = boxed,
             opened = opened.takeIf { boxed },
+            size = size,
+            // Opened just now, it is full; else what is left, no more than the boxes hold.
+            left = if (!isOpened || size == null) null else (left ?: (size.value * count)).coerceIn(0.0, size.value * count),
             at = doc.stamp(),
             by = device,
         )
         return doc.withItem(edited)
+    }
+
+    /**
+     * Takes [amount] (in the unit of its size) out of an opened box of known size: what is left goes
+     * down, and so does the count of boxes holding it; when nothing is left, it leaves the pantry.
+     */
+    fun useAmount(doc: PantryDocument, id: String, amount: Double): PantryDocument {
+        val item = doc.item(id) ?: return doc
+        val size = item.size ?: return doc
+        val left = (item.left ?: (size.value * item.quantity)) - amount.coerceAtLeast(0.0)
+        if (left <= EMPTY) return removeItem(doc, id)
+        val boxes = kotlin.math.ceil(left / size.value - EMPTY).toInt().coerceIn(1, item.quantity)
+        return doc.withItem(item.copy(left = left, quantity = boxes, at = doc.stamp(), by = device))
     }
 
     /**
@@ -117,16 +141,18 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
         val item = doc.item(id)?.takeIf { it.opened == null } ?: return doc to id
         val at = doc.stamp()
         val opening = count.coerceIn(1, item.quantity)
-        val twin = doc.sameFood(item.name, item.space, item.expires, day)
+        // Boxes of a known size are followed one by one, each with what is left of it.
+        val twin = doc.sameFood(item.name, item.space, item.expires, day, item.size).takeIf { item.size == null }
+        val full = item.size?.let { it.value * opening }
         if (twin != null) {
             val rest = if (opening == item.quantity) item.copy(deleted = true) else item.copy(quantity = item.quantity - opening, boxed = true)
             val joined = twin.copy(quantity = twin.quantity + opening, bought = earlier(twin.bought, item.bought), at = at, by = device)
             return doc.withItem(rest.copy(at = at, by = device)).withItem(joined) to twin.id
         }
         if (opening == item.quantity) {
-            return doc.withItem(item.copy(boxed = true, opened = day, at = at, by = device)) to id
+            return doc.withItem(item.copy(boxed = true, opened = day, left = full, at = at, by = device)) to id
         }
-        val opened = item.copy(id = newId(), quantity = opening, boxed = true, opened = day, at = at, by = device)
+        val opened = item.copy(id = newId(), quantity = opening, boxed = true, opened = day, left = full, at = at, by = device)
         val closed = item.copy(quantity = item.quantity - opening, boxed = true, at = at, by = device)
         val withClosed = doc.withItem(closed)
         return withClosed.copy(items = withClosed.items + opened) to opened.id
@@ -139,9 +165,10 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
     fun moveItem(doc: PantryDocument, id: String, space: String, count: Int = Int.MAX_VALUE): PantryDocument {
         val item = doc.item(id) ?: return doc
         if (item.space == space) return doc
-        val moving = count.coerceIn(1, item.quantity)
+        // Opened boxes with some left go together.
+        val moving = if (item.left != null) item.quantity else count.coerceIn(1, item.quantity)
         val at = doc.stamp()
-        val target = doc.sameFood(item.name, space, item.expires, item.opened)
+        val target = doc.sameFood(item.name, space, item.expires, item.opened, item.size).takeIf { item.left == null || it?.left != null }
         var result = if (moving == item.quantity) {
             if (target == null) {
                 return doc.withItem(item.copy(space = space, at = at, by = device))
@@ -155,6 +182,7 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
                 quantity = target.quantity + moving,
                 bought = earlier(target.bought, item.bought),
                 boxed = target.boxed || item.boxed,
+                left = if (target.left != null && item.left != null) target.left + item.left else target.left,
                 at = at,
                 by = device,
             )
@@ -202,11 +230,34 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
         )
     }
 
+    /**
+     * Takes back what [change] did to the costs, the way [revert] does to the pantry: each purchase it
+     * touched returns to how it was (one it added is deleted), unless changed again since.
+     */
+    fun revertCosts(costs: CostsDocument, change: PantryChange): CostsDocument {
+        if (change.purchases.isEmpty()) return costs
+        val at = maxOf(now(), (costs.purchases.maxOfOrNull { it.at } ?: 0) + 1)
+        val purchases = change.purchases.associateBy { (_, new) -> new.id }
+        return costs.copy(
+            purchases = costs.purchases.map { current ->
+                val (old, new) = purchases[current.id] ?: return@map current
+                if (!current.sameAs(new)) current else (old ?: new.copy(deleted = true)).copy(at = at, by = device)
+            },
+        )
+    }
+
     /** Of two days an item was bought, the earlier: food counted together keeps its oldest. */
     private fun earlier(a: LocalDate?, b: LocalDate?): LocalDate? = listOfNotNull(a, b).minOrNull()
 
-    private fun PantryDocument.sameFood(name: String, space: String, expires: LocalDate?, opened: LocalDate?): PantryItem? =
-        liveItems().firstOrNull { it.space == space && it.expires == expires && it.opened == opened && nameKey(it.name) == nameKey(name) }
+    private fun PantryDocument.sameFood(name: String, space: String, expires: LocalDate?, opened: LocalDate?, size: Measure?): PantryItem? =
+        liveItems().firstOrNull {
+            it.space == space && it.expires == expires && it.opened == opened && it.size == size && nameKey(it.name) == nameKey(name)
+        }
+
+    private companion object {
+        /** Less than this is nothing left: what rounding leaves of grams and millilitres. */
+        const val EMPTY = 0.001
+    }
 
     private fun PantryDocument.withItem(item: PantryItem): PantryDocument =
         copy(items = items.map { if (it.id == item.id) item else it })

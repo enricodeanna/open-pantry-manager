@@ -54,6 +54,11 @@ val Italian = VoiceLanguage(
     move = participles("spostat", "trasferit", "portat") +
         setOf("sposto", "spostiamo", "trasferisco", "porto", "portiamo", "sposta", "trasferisci", "porta"),
     take = participles("pres") + setOf("prendo", "prendiamo"),
+    units = mapOf(
+        "grammi" to grams(1.0), "grammo" to grams(1.0), "gr" to grams(1.0), "etto" to grams(100.0), "etti" to grams(100.0),
+        "chilo" to grams(1000.0), "chili" to grams(1000.0), "chilogrammi" to grams(1000.0), "kg" to grams(1000.0),
+        "millilitri" to millilitres(1.0), "ml" to millilitres(1.0), "litro" to millilitres(1000.0), "litri" to millilitres(1000.0),
+    ),
     // "Ho iniziato i biscotti": a new packet started is opened.
     open = participles("apert", "iniziat", "cominciat") + setOf("apro", "apriamo", "apri", "inizio", "iniziamo", "comincio", "cominciamo"),
     numbers = mapOf(

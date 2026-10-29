@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import eu.studiodeanna.openpantrymanager.PantryRepository
+import eu.studiodeanna.openpantrymanager.ReceiptReview
 import eu.studiodeanna.openpantrymanager.UndoStep
 import eu.studiodeanna.openpantrymanager.model.Space
 import eu.studiodeanna.openpantrymanager.model.nameKey
@@ -69,21 +70,24 @@ private data class ReviewRow(
 
 /**
  * What was read on a receipt, for the user to check before anything is saved: each line's food,
- * where it goes, how many and until when. Lines the app is unsure about come first and say so; lines
- * left out before come last, left out again. Saving ([save]) puts the food away and teaches the app.
- * What was ticked on the shopping list is checked here too, under another [title].
+ * where it goes, how many and until when, what it cost and what one holds; the shop, and whether the
+ * prices add up to the receipt's total. Lines the app is unsure about come first and say so; lines left
+ * out before come last, left out again. Saving ([save]) puts the food away, its costs with it, and
+ * teaches the app. What was ticked on the shopping list is checked here too, under another [title].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReceiptScreen(
     repository: PantryRepository,
-    entries: List<ReceiptEntry>,
+    review: ReceiptReview,
     onBack: () -> Unit,
     onSaved: (count: Int, undo: UndoStep?) -> Unit,
     title: String = strings.receipt,
     closeLabel: String = strings.discardReceipt,
-    save: (List<ReceiptEntry>, LocalDate?) -> Pair<UndoStep?, Int> = repository::saveReceipt,
+    save: (entries: List<ReceiptEntry>, bought: LocalDate?, shop: String?) -> Pair<UndoStep?, Int> =
+        { entries, bought, shop -> repository.saveReceipt(entries, bought, shop, review.shopRow) },
 ) {
+    val entries = review.entries
     val doc by repository.pantry.collectAsState()
     val spaces = remember(doc) { doc.visibleSpaces() }
     val today = repository.today()
@@ -99,6 +103,7 @@ fun ReceiptScreen(
     var newSpaceFor by remember { mutableStateOf<Int?>(null) }
     /** When it was all bought, which expiry days are reckoned from: today, unless the receipt is older. */
     var bought by remember { mutableStateOf<LocalDate?>(today) }
+    var shop by remember { mutableStateOf(review.shop.orEmpty()) }
     val from = bought ?: today
     val needHelp = rows.count { it.entry.include && (it.unsure || it.entry.space == null) }
     val canSave = rows.all { it.ready } && rows.any { it.entry.include }
@@ -128,7 +133,7 @@ fun ReceiptScreen(
                 actions = {
                     TextButton(
                         onClick = {
-                            val (step, count) = save(rows.map { it.entry }, bought)
+                            val (step, count) = save(rows.map { it.entry }, bought, shop.trim().takeIf { it.isNotEmpty() })
                             onSaved(count, step)
                         },
                         enabled = canSave,
@@ -152,7 +157,28 @@ fun ReceiptScreen(
                     )
                 }
                 item(key = "bought") {
-                    Box(Modifier.padding(bottom = 8.dp)) { BoughtField(bought, today, ::changeBought) }
+                    Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = shop,
+                            onValueChange = { shop = it },
+                            label = { Text(strings.shop) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        BoughtField(bought, today, ::changeBought)
+                        // The prices kept against the total printed: a line misread shows here.
+                        review.total?.let { total ->
+                            val sum = rows.filter { it.entry.include }.sumOf { kotlin.math.round((it.entry.price ?: 0.0) * 100).toLong() }
+                            val printed = kotlin.math.round(total * 100).toLong()
+                            Text(
+                                if (sum == printed) strings.totalMatches(strings.money(printed)) else strings.totalDiffers(strings.money(sum), strings.money(printed)),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (sum == printed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary,
+                                fontWeight = if (sum == printed) null else FontWeight.SemiBold,
+                            )
+                        }
+                    }
                 }
                 itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
                     ReceiptRowCard(
@@ -286,6 +312,18 @@ private fun ReceiptRowCard(
                         ExpiryField(entry.expires, today, repository.food(entry.name)?.keepsDays, from = from, compact = true) { date ->
                             onChange { it.copy(entry = it.entry.copy(expires = date), expiryPicked = true) }
                         }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    MoneyField(entry.price?.let { kotlin.math.round(it * 100).toLong() }, strings.price, Modifier.weight(1f)) { cents ->
+                        onChange { it.copy(entry = it.entry.copy(price = cents?.let { c -> c / 100.0 })) }
+                    }
+                    val weighed = entry.weighed
+                    if (weighed != null) {
+                        // Sold by weight: what the scales said.
+                        Text(strings.measure(weighed), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    } else {
+                        SizeField(entry.size, strings.packageSize, Modifier.weight(1f)) { size -> onChange { it.copy(entry = it.entry.copy(size = size)) } }
                     }
                 }
             }

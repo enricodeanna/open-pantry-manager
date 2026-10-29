@@ -45,8 +45,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import eu.studiodeanna.openpantrymanager.PantryRepository
+import eu.studiodeanna.openpantrymanager.ReceiptReview
 import eu.studiodeanna.openpantrymanager.receipt.OcrLine
-import eu.studiodeanna.openpantrymanager.receipt.ReceiptEntry
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -69,7 +69,7 @@ fun ReceiptPhotosScreen(
     scanner: ReceiptScanner,
     snackbars: SnackbarHostState,
     onBack: () -> Unit,
-    onRead: (List<ReceiptEntry>) -> Unit,
+    onRead: (ReceiptReview) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val photos = remember { mutableStateListOf<Taken>() }
@@ -127,8 +127,8 @@ fun ReceiptPhotosScreen(
             try {
                 photos.toList().forEach { it.job?.join() }
                 val pages = photos.mapNotNull { it.lines }
-                val entries = if (pages.isEmpty()) emptyList() else repository.understandReceipt(pages)
-                if (entries.isEmpty()) say(texts.nothingOnReceipt) else onRead(entries)
+                val review = if (pages.isEmpty()) null else repository.understandReceipt(pages)
+                if (review == null || review.entries.isEmpty()) say(texts.nothingOnReceipt) else onRead(review)
             } finally {
                 understanding = false
             }

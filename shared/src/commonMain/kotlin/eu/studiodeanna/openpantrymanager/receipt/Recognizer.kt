@@ -1,5 +1,8 @@
 package eu.studiodeanna.openpantrymanager.receipt
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
+import eu.studiodeanna.openpantrymanager.costs.sizeIn
 import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.placeFor
 import eu.studiodeanna.openpantrymanager.memory.receiptKey
@@ -22,7 +25,8 @@ enum class Recognition {
 
 /**
  * A receipt line as the app understood it, ready for the user to check: what food it is, how many,
- * where it goes and, for foods whose keeping time it has learned, until when they keep.
+ * where it goes and, for foods whose keeping time it has learned, until when they keep; what was paid
+ * for them all ([price]), what one of them holds ([size]), and for food sold by weight what it weighed.
  */
 data class ReceiptEntry(
     val line: ReceiptLine,
@@ -32,6 +36,9 @@ data class ReceiptEntry(
     val space: String?,
     val expires: LocalDate?,
     val include: Boolean,
+    val price: Double? = line.price,
+    val size: Measure? = null,
+    val weighed: Measure? = line.kilograms?.let { Measure(it * 1000, MeasureUnit.Gram) },
 )
 
 object Recognizer {
@@ -44,7 +51,13 @@ object Recognizer {
         val merged = LinkedHashMap<String, ReceiptLine>()
         for (line in lines) {
             val key = receiptKey(line.text).ifEmpty { line.text }
-            merged[key] = merged[key]?.let { it.copy(quantity = it.quantity + line.quantity) } ?: line
+            merged[key] = merged[key]?.let {
+                it.copy(
+                    quantity = it.quantity + line.quantity,
+                    price = if (it.price != null && line.price != null) it.price + line.price else it.price ?: line.price,
+                    kilograms = if (it.kilograms != null && line.kilograms != null) it.kilograms + line.kilograms else it.kilograms ?: line.kilograms,
+                )
+            } ?: line
         }
         return merged.values.map { line -> entry(line, memory, spaces, today) }
     }
@@ -68,6 +81,8 @@ object Recognizer {
             space = memory.placeFor(name, spaces),
             expires = food?.keepsDays?.let { today.plus(DatePeriod(days = it)) },
             include = recognition != Recognition.Skipped,
+            // What the line prints ("YOGURT 500G") is this time's size; else the one the food had before.
+            size = sizeIn(line.text) ?: food?.size,
         )
     }
 

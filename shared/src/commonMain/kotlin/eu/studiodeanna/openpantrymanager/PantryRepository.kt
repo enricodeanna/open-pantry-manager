@@ -13,6 +13,13 @@ import eu.studiodeanna.openpantrymanager.checklist.pending
 import eu.studiodeanna.openpantrymanager.checklist.pruned
 import eu.studiodeanna.openpantrymanager.checklist.similarItems
 import eu.studiodeanna.openpantrymanager.checklist.visibleSections
+import eu.studiodeanna.openpantrymanager.costs.CostsCodec
+import eu.studiodeanna.openpantrymanager.costs.CostsDocument
+import eu.studiodeanna.openpantrymanager.costs.CostsFormat
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.Purchase
+import eu.studiodeanna.openpantrymanager.costs.merge
+import eu.studiodeanna.openpantrymanager.costs.pruned
 import eu.studiodeanna.openpantrymanager.memory.Food
 import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.changedTo
@@ -20,6 +27,12 @@ import eu.studiodeanna.openpantrymanager.memory.combinedWith
 import eu.studiodeanna.openpantrymanager.memory.complete
 import eu.studiodeanna.openpantrymanager.memory.boxed
 import eu.studiodeanna.openpantrymanager.memory.food
+import eu.studiodeanna.openpantrymanager.memory.grouped
+import eu.studiodeanna.openpantrymanager.memory.inSublist
+import eu.studiodeanna.openpantrymanager.memory.served
+import eu.studiodeanna.openpantrymanager.memory.shopFor
+import eu.studiodeanna.openpantrymanager.memory.shopIs
+import eu.studiodeanna.openpantrymanager.memory.sized
 import eu.studiodeanna.openpantrymanager.memory.foodOnList
 import eu.studiodeanna.openpantrymanager.memory.handledFromList
 import eu.studiodeanna.openpantrymanager.memory.isBoxed
@@ -50,6 +63,7 @@ import eu.studiodeanna.openpantrymanager.model.compareStamps
 import eu.studiodeanna.openpantrymanager.model.item
 import eu.studiodeanna.openpantrymanager.model.liveItems
 import eu.studiodeanna.openpantrymanager.model.mergeStamped
+import eu.studiodeanna.openpantrymanager.model.newId
 import eu.studiodeanna.openpantrymanager.model.nameKey
 import eu.studiodeanna.openpantrymanager.model.pantryChangeBetween
 import eu.studiodeanna.openpantrymanager.model.pruned
@@ -142,7 +156,22 @@ class ListChoiceNeeded(val link: ShareLink, val lists: List<SharedList>) : Remot
  * [ranOut]: none of that food is left unopened now (the last one finished, the last box opened), so
  * it may go on the shopping list.
  */
-data class Taken(val action: PantryAction, val step: UndoStep?, val left: Int, val ranOut: Boolean)
+data class Taken(
+    val action: PantryAction,
+    val step: UndoStep?,
+    val left: Int,
+    val ranOut: Boolean,
+    /** The item that took it: for a box opened, the opened box; null once it left the pantry. */
+    val item: String? = null,
+    /** What is left of an opened box of known size, in its unit. */
+    val leftAmount: Measure? = null,
+)
+
+/**
+ * A receipt as read, to review: its [entries], the [total] it prints, the row of its header that names
+ * the shop ([shopRow]), and the [shop] as the user called it last time, or as printed.
+ */
+data class ReceiptReview(val entries: List<ReceiptEntry>, val total: Double? = null, val shopRow: String = "", val shop: String? = null)
 
 /** The shared pantry this device is in, and how syncing it goes. */
 data class PantrySharing(val link: ShareLink, val sync: SyncState)
@@ -185,6 +214,11 @@ class PantryRepository(
 ) {
     private val _pantry = MutableStateFlow(PantryDocument())
     val pantry: StateFlow<PantryDocument> = _pantry.asStateFlow()
+
+    private val _costs = MutableStateFlow(CostsDocument())
+
+    /** What the household paid for its food. */
+    val costs: StateFlow<CostsDocument> = _costs.asStateFlow()
 
     private val _memory = MutableStateFlow(Memory())
     val memory: StateFlow<Memory> = _memory.asStateFlow()
@@ -233,6 +267,8 @@ class PantryRepository(
     private var pendingSync: Job? = null
     private val pantryLock = Mutex()
     private var pendingPantrySync: Job? = null
+    private val costsLock = Mutex()
+    private var pendingCostsSync: Job? = null
 
     /** Reads everything from disk; later calls (a recreated screen, say) do nothing. */
     suspend fun load() {
@@ -244,6 +280,11 @@ class PantryRepository(
                 .onSuccess { _pantry.value = it }
                 // Kept aside rather than overwritten by the next edit, so nothing is lost for good.
                 .onFailure { files.write("pantry-unreadable-${now()}.json", text) }
+        }
+        files.read(COSTS)?.let { text ->
+            runCatching { withContext(work) { CostsCodec.decode(text) } }
+                .onSuccess { _costs.value = it }
+                .onFailure { files.write("costs-unreadable-${now()}.json", text) }
         }
         device = read(DEVICE, DeviceState.serializer()) ?: DeviceState(newDeviceId()).also { saveDevice(it) }
         _collapsed.value = device.collapsedSpaces
@@ -307,8 +348,10 @@ class PantryRepository(
 
     /**
      * Puts food in a space, bought on [bought] (today, unless said otherwise; null if not known), in
-     * closed boxes if [boxed] (null: as that food came last time), and learns that it goes there, whether
-     * it comes in boxes and, with an [expires] day, how long it keeps. Returns what undoes it.
+     * closed boxes if [boxed] (null: as that food came last time) of [size] each (null: as last time), and
+     * learns that it goes there, whether it comes in boxes and how big, and, with an [expires] day, how
+     * long it keeps. With a [price] (in cents, for all of them), what was paid goes in the costs, with the
+     * [shop]. Returns what undoes it.
      */
     fun addItem(
         name: String,
@@ -317,11 +360,21 @@ class PantryRepository(
         expires: LocalDate? = null,
         bought: LocalDate? = today(),
         boxed: Boolean? = null,
+        size: Measure? = null,
+        price: Long? = null,
+        shop: String? = null,
     ): UndoStep? {
-        val inBoxes = boxed ?: _memory.value.isBoxed(name)
-        return edit(PantryAction.AddedFood(name.trim()), { editor.addItem(it, name, space, quantity, expires, bought, inBoxes).first }) {
+        val known = _memory.value
+        val inBoxes = boxed ?: known.isBoxed(name)
+        val packageSize = (size ?: known.food(name)?.size).takeIf { inBoxes }
+        return edit(
+            PantryAction.AddedFood(name.trim()),
+            { editor.addItem(it, name, space, quantity, expires, bought, inBoxes, packageSize).first },
+            buy = { costs -> price?.let { costs.bought(name, quantity, it, bought ?: today(), packageSize?.times(quantity), shop) } ?: costs },
+        ) {
             val placed = it.placed(name, space, now(), today(), expires, bought)
-            if (boxed != null) placed.boxed(name, boxed) else placed
+            val boxedNow = if (boxed != null) placed.boxed(name, boxed) else placed
+            if (size != null && inBoxes) boxedNow.sized(name, size) else boxedNow
         }
     }
 
@@ -338,16 +391,19 @@ class PantryRepository(
         bought: LocalDate? = null,
         boxed: Boolean = _pantry.value.item(id)?.boxed ?: false,
         opened: LocalDate? = _pantry.value.item(id)?.opened,
+        size: Measure? = _pantry.value.item(id)?.size,
+        left: Double? = _pantry.value.item(id)?.left,
     ): Taken? {
         val item = _pantry.value.item(id) ?: return null
         val before = _pantry.value
         val action = PantryAction.EditedFood(name.trim())
         val step = edit(action, { doc ->
-            val edited = editor.editItem(doc, id, name, quantity, expires, bought, boxed, opened)
+            val edited = editor.editItem(doc, id, name, quantity, expires, bought, boxed, opened, size, left)
             if (space != item.space) editor.moveItem(edited, id, space) else edited
         }) { memory ->
             val moved = if (space != item.space) memory.moved(name, item.space, space) else memory
-            if (boxed != item.boxed) moved.boxed(name, boxed) else moved
+            val boxedNow = if (boxed != item.boxed) moved.boxed(name, boxed) else moved
+            if (size != null && size != item.size) boxedNow.sized(name, size) else boxedNow
         }
         val after = _pantry.value
         val openedNow = item.opened == null && boxed && opened != null && nameKey(name) == nameKey(item.name)
@@ -389,10 +445,30 @@ class PantryRepository(
      */
     fun open(id: String, count: Int = 1): Taken? {
         val item = _pantry.value.item(id)?.takeIf { it.opened == null } ?: return null
-        return taking(item, PantryAction.Opened(item.name), { editor.open(it, id, today(), count).first }) { _, memory ->
+        var opened = id
+        return taking(item, PantryAction.Opened(item.name), { doc -> editor.open(doc, id, today(), count).also { opened = it.second }.first }) { _, memory ->
             memory.boxed(item.name, true)
-        }
+        }.let { it.copy(item = opened, leftAmount = _pantry.value.item(opened)?.leftAmount()) }
     }
+
+    /**
+     * Takes [amount] (in the unit of its size) from an opened box of known size, and learns how much of
+     * that food is used at a time; the last of it takes the box out of the pantry, as finished.
+     */
+    fun useAmount(id: String, amount: Double): Taken? {
+        val item = _pantry.value.item(id)?.takeIf { it.opened != null } ?: return null
+        val size = item.size ?: return null
+        val left = item.left ?: (size.value * item.quantity)
+        val all = amount >= left - 0.001
+        val action = if (all) PantryAction.Finished(item.name) else PantryAction.UsedAmount(item.name, Measure(amount, size.unit))
+        return taking(item, action, { editor.useAmount(it, id, amount) }) { finished, memory ->
+            val served = memory.served(item.name, amount.coerceAtMost(left))
+            if (all) lastedOpened(finished, served) else served
+        }.let { it.copy(leftAmount = _pantry.value.item(id)?.leftAmount()) }
+    }
+
+    /** What is left of an opened box of known size. */
+    private fun PantryItem.leftAmount(): Measure? = size?.let { size -> left?.let { Measure(it, size.unit) } }
 
     /** Takes all of an item out of the pantry: it is finished. */
     fun finish(id: String): Taken? {
@@ -414,7 +490,8 @@ class PantryRepository(
         val before = _pantry.value
         val step = edit(action, change) { learn(item, it) }
         val after = _pantry.value
-        return Taken(action, step, after.item(item.id)?.quantity ?: 0, ranOut(item.name, before, after))
+        val now = after.item(item.id)
+        return Taken(action, step, now?.quantity ?: 0, ranOut(item.name, before, after), now?.id, now?.leftAmount())
     }
 
     /** Whether going from [before] to [after] left none of the food [name] unopened, where there was some. */
@@ -468,13 +545,16 @@ class PantryRepository(
             val step = history.next(redo) ?: return null
             val doc = _pantry.value
             val known = _memory.value
+            val paid = _costs.value
             val reverted = editor.revert(doc, step.change)
             val learned = known.reverted(step.change.learned, stamp())
-            val back = pantryChangeBetween(doc, reverted, known, learned)
+            val paidBack = editor.revertCosts(paid, step.change)
+            val back = pantryChangeBetween(doc, reverted, known, learned, paid, paidBack)
             history = history.took(redo, back)
             if (back != null) {
                 setPantry(reverted)
                 setMemory(learned)
+                setCosts(paidBack)
                 return step.action
             }
         }
@@ -484,17 +564,67 @@ class PantryRepository(
      * Makes an edit of the pantry, called [action], and learns from it; it can be undone. Returns what
      * undoes it; null if it changed nothing, and nothing is saved then.
      */
-    private fun edit(action: PantryAction, change: (PantryDocument) -> PantryDocument, learn: (Memory) -> Memory = { it }): UndoStep? {
+    private fun edit(
+        action: PantryAction,
+        change: (PantryDocument) -> PantryDocument,
+        buy: (CostsDocument) -> CostsDocument = { it },
+        learn: (Memory) -> Memory = { it },
+    ): UndoStep? {
         val before = _pantry.value
         val after = change(before)
         val known = _memory.value
         val learned = known.changedTo(learn(known), stamp())
-        val diff = pantryChangeBetween(before, after, known, learned) ?: return null
+        val paid = _costs.value
+        val paidAfter = buy(paid)
+        val diff = pantryChangeBetween(before, after, known, learned, paid, paidAfter) ?: return null
         history = history.record(diff, action)
         setPantry(after)
         setMemory(learned)
+        setCosts(paidAfter)
         return history.undo.last()
     }
+
+    // Costs
+
+    /** This costs document with a new purchase: [quantity] of [food] for [cents] on [day], [amount] in all, at [shop]. */
+    private fun CostsDocument.bought(food: String, quantity: Int, cents: Long, day: LocalDate, amount: Measure?, shop: String?): CostsDocument {
+        val purchase = Purchase(newId(), food.trim(), quantity.coerceAtLeast(1), cents.coerceAtLeast(0), day, amount, shop?.trim()?.takeIf { it.isNotEmpty() }, costsStamp(), device.device)
+        return copy(purchases = purchases + purchase)
+    }
+
+    private fun CostsDocument.costsStamp(): Long = maxOf(now(), (purchases.maxOfOrNull { it.at } ?: 0) + 1)
+
+    /** Changes a purchase: how many, what was paid in all (cents), the day, the shop, and the amount bought. Returns what undoes it. */
+    fun editPurchase(id: String, quantity: Int, cents: Long, day: LocalDate, shop: String?, amount: Measure?): UndoStep? {
+        val purchase = _costs.value.purchases.firstOrNull { it.id == id && !it.deleted } ?: return null
+        return edit(PantryAction.EditedPurchase(purchase.food), { it }, buy = { costs ->
+            val edited = purchase.copy(
+                quantity = quantity.coerceAtLeast(1),
+                cents = cents.coerceAtLeast(0),
+                day = day,
+                shop = shop?.trim()?.takeIf { it.isNotEmpty() },
+                amount = amount,
+                at = costs.costsStamp(),
+                by = device.device,
+            )
+            costs.copy(purchases = costs.purchases.map { if (it.id == id) edited else it })
+        })
+    }
+
+    /** Deletes a purchase from the costs. Returns what undoes it. */
+    fun deletePurchase(id: String): UndoStep? {
+        val purchase = _costs.value.purchases.firstOrNull { it.id == id && !it.deleted } ?: return null
+        return edit(PantryAction.DeletedPurchase(purchase.food), { it }, buy = { costs ->
+            val gone = purchase.copy(deleted = true, at = costs.costsStamp(), by = device.device)
+            costs.copy(purchases = costs.purchases.map { if (it.id == id) gone else it })
+        })
+    }
+
+    /** Counts [food]'s costs in the group of like products [group] from now on, past ones too; null: in its own. */
+    fun setGroup(food: String, group: String?) = learnNow(_memory.value.grouped(food, group))
+
+    /** Puts [food] in the shopping list's sublist [sublist] ("" for none), for its costs and the list alike. */
+    fun setSublist(food: String, sublist: String) = learnNow(_memory.value.inSublist(food, sublist))
 
     /** What the app knows now: [learned], which it became on this device, stamped where it changed. */
     private fun learnNow(learned: Memory) = setMemory(_memory.value.changedTo(learned, stamp()))
@@ -524,16 +654,23 @@ class PantryRepository(
      * Reads a receipt from the text found on its photos, taken top to bottom, and says what each product
      * line probably is, and until when it keeps if bought on [bought].
      */
-    fun understandReceipt(pages: List<List<OcrLine>>, bought: LocalDate = today()): List<ReceiptEntry> =
-        Recognizer.recognize(ReceiptParser.parsePages(pages), _memory.value, liveSpaces(), bought)
+    fun understandReceipt(pages: List<List<OcrLine>>, bought: LocalDate = today()): ReceiptReview {
+        val receipt = ReceiptParser.readPages(pages)
+        val entries = Recognizer.recognize(receipt.lines, _memory.value, liveSpaces(), bought)
+        val row = receipt.shopRow.orEmpty()
+        return ReceiptReview(entries, receipt.total, row, _memory.value.shopFor(row) ?: receipt.shop)
+    }
 
     /**
      * Puts the included entries in the pantry, bought on [bought], and learns what each line was: the
      * food it is, where that goes, how long it keeps; and that lines left out are not for the pantry.
      * Returns what undoes it, and how many items were put away.
      */
-    fun saveReceipt(entries: List<ReceiptEntry>, bought: LocalDate? = today()): Pair<UndoStep?, Int> =
-        putAway(entries, bought, fromReceipt = true) { it }
+    fun saveReceipt(entries: List<ReceiptEntry>, bought: LocalDate? = today(), shop: String? = null, shopRow: String = ""): Pair<UndoStep?, Int> =
+        putAway(entries, bought, shop, fromReceipt = true) { memory ->
+            // The shop its row names, as the user called it, for the next receipt of that shop.
+            if (shop != null && shopRow.isNotBlank()) memory.shopIs(shopRow, shop) else memory
+        }
 
     /**
      * Items ticked on the shopping list in the last [BOUGHT_DAYS] days that were neither put in the
@@ -574,9 +711,9 @@ class PantryRepository(
      * bought on [bought], learns where each goes and how long it keeps, and that those items are put
      * away: they are not offered again. Returns what undoes it, and how many items were put away.
      */
-    fun putAwayFromList(entries: List<ReceiptEntry>, items: List<Item>, bought: LocalDate? = today()): Pair<UndoStep?, Int> {
+    fun putAwayFromList(entries: List<ReceiptEntry>, items: List<Item>, bought: LocalDate? = today(), shop: String? = null): Pair<UndoStep?, Int> {
         val onList = _shopping.value?.doc?.items?.mapTo(HashSet()) { it.id }.orEmpty()
-        return putAway(entries, bought, fromReceipt = false) { it.handledFromList(items.associate { item -> item.id to item.at }, onList) }
+        return putAway(entries, bought, shop, fromReceipt = false) { it.handledFromList(items.associate { item -> item.id to item.at }, onList) }
     }
 
     /** Lets the shopping list's [items] go: bought, but not for the pantry, or put away by hand. They are not offered again. */
@@ -586,17 +723,32 @@ class PantryRepository(
     }
 
     /**
-     * Puts the included entries in the pantry and learns where each goes and how long it keeps; [fromReceipt],
-     * also what each receipt line is, and that lines left out are not for the pantry; and what [also] says.
+     * Puts the included entries in the pantry, and what was paid for them, at [shop], in the costs; learns
+     * where each goes, how long it keeps and how big its box is; [fromReceipt], also what each receipt line
+     * is, and that lines left out are not for the pantry; and what [also] says.
      */
-    private fun putAway(entries: List<ReceiptEntry>, bought: LocalDate?, fromReceipt: Boolean, also: (Memory) -> Memory): Pair<UndoStep?, Int> {
+    private fun putAway(
+        entries: List<ReceiptEntry>,
+        bought: LocalDate?,
+        shop: String?,
+        fromReceipt: Boolean,
+        also: (Memory) -> Memory,
+    ): Pair<UndoStep?, Int> {
         val spaces = liveSpaces()
         val kept = entries.filter { it.include && it.name.isNotBlank() && it.space in spaces }
         val known = _memory.value
         val count = kept.sumOf { it.quantity }
         val action = if (fromReceipt) PantryAction.PutAway(count) else PantryAction.PutAwayFromList(count)
         val step = edit(action, { doc ->
-            kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought, known.isBoxed(e.name)).first }
+            kept.fold(doc) { d, e ->
+                val boxed = known.isBoxed(e.name)
+                editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought, boxed, e.size.takeIf { boxed }).first
+            }
+        }, buy = { costs ->
+            kept.fold(costs) { c, e ->
+                val price = e.price ?: return@fold c
+                c.bought(e.name, e.quantity, kotlin.math.round(price * 100).toLong(), bought ?: today(), e.weighed ?: e.size?.times(e.quantity), shop)
+            }
         }) { memory ->
             also(entries.fold(memory) { m, e ->
                 // Products the user added by hand, and the shopping list's, have no receipt line to learn.
@@ -605,8 +757,9 @@ class PantryRepository(
                     e in kept -> {
                         // 6 items for 1 printed: a pack of 6, remembered for that line.
                         val pack = if (e.quantity % e.line.quantity == 0) e.quantity / e.line.quantity else 1
-                        (if (printed) m.receiptMeans(e.line.text, e.name, pack) else m)
+                        val placed = (if (printed) m.receiptMeans(e.line.text, e.name, pack) else m)
                             .placed(e.name, e.space!!, now(), today(), e.expires, bought)
+                        e.size?.let { placed.sized(e.name, it) } ?: placed
                     }
                     !e.include && printed -> m.receiptSkips(e.line.text)
                     else -> m
@@ -764,6 +917,7 @@ class PantryRepository(
     /** Syncs the shopping list, and the pantry when it is shared, now: when the app is opened again, say. */
     fun syncNow() {
         schedulePantrySync(0)
+        scheduleCostsSync(0)
         scheduleSync(0)
     }
 
@@ -939,6 +1093,8 @@ class PantryRepository(
         _sharing.value = PantrySharing(link, SyncState.Synced(now()))
         saveDevice(device.copy(pantryLink = link, pantrySyncedAt = now()))
         adoptShoppingList(shared.shoppingList)
+        // The costs of both, this phone's and the household's, become one.
+        scheduleCostsSync(0)
     }
 
     /**
@@ -993,6 +1149,55 @@ class PantryRepository(
         saveSoon(PANTRY, { _pantry.value }) { PantryCodec.encode(it.pruned(now())) }
     }
 
+    /** The costs as changed on this device: saved, and passed on to the shared pantry's costs shortly. */
+    private fun setCosts(costs: CostsDocument) {
+        if (costs === _costs.value) return
+        showCosts(costs)
+        scheduleCostsSync(syncDelayMillis)
+    }
+
+    private fun showCosts(costs: CostsDocument) {
+        _costs.value = costs
+        saveSoon(COSTS, { _costs.value }) { CostsCodec.encode(it.pruned(now())) }
+    }
+
+    /**
+     * The shared costs' file, next to the shared pantry's in its folder ("Dispensa.costs" by
+     * "Dispensa.pantry"); null while the pantry is not shared, or shared as a single file, where the costs
+     * stay on this phone.
+     */
+    private fun costsLink(): ShareLink? {
+        val link = device.pantryLink ?: return null
+        val pantryFile = link.fileName ?: return null
+        return link.copy(fileName = pantryFile.removeSuffix(SharedPantry.EXTENSION) + CostsDocument.EXTENSION)
+    }
+
+    private fun scheduleCostsSync(delayMillis: Long) {
+        if (costsLink() == null) return
+        pendingCostsSync?.cancel()
+        pendingCostsSync = scope.launch {
+            delay(delayMillis)
+            syncCosts()
+        }
+    }
+
+    /**
+     * Runs one sync of the shared costs, which go in a file of their own so that the pantry's, synced at
+     * every change, does not carry the whole history; a failure shows on [sharing] like the pantry's.
+     */
+    suspend fun syncCosts() = costsLock.withLock {
+        val link = costsLink() ?: return@withLock
+        try {
+            val merged = withContext(work) { syncDocument(remoteFileFor(link, http), _costs.value.pruned(now()), CostsFormat) }
+            if (costsLink() != link) return@withLock
+            val combined = _costs.value.merge(merged)
+            showCosts(combined)
+            if (combined != merged) scheduleCostsSync(syncDelayMillis)
+        } catch (e: RemoteException) {
+            _sharing.update { if (it?.link == device.pantryLink) it?.copy(sync = SyncState.Failed(e.message ?: Messages.current.syncFailed)) else it }
+        }
+    }
+
     private fun showMemory(memory: Memory) {
         _memory.value = memory
         saveSoon(MEMORY, { _memory.value }) { json.encodeToString(Memory.serializer(), it) }
@@ -1041,6 +1246,7 @@ class PantryRepository(
     private companion object {
         const val PANTRY = "pantry.json"
         const val MEMORY = "memory.json"
+        const val COSTS = "costs.json"
         const val SETTINGS = "settings.json"
         const val DEVICE = "device.json"
         /** This device's copy of the shopping list, in Open Check Lists' format. */

@@ -1,5 +1,7 @@
 package eu.studiodeanna.openpantrymanager.voice
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
 import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.phraseMeans
 import eu.studiodeanna.openpantrymanager.memory.placed
@@ -246,5 +248,19 @@ class VoiceCommandTest {
         assertEquals(VoiceCommand.Finish(open), said("ho finito i biscotti"))
         assertEquals(VoiceCommand.Use(open, 1), said("ho mangiato i biscotti"))
         assertEquals(VoiceCommand.Open(stillClosed, 1), said("ho aperto i biscotti"))
+    }
+
+    @Test
+    fun anAmountSaidIsTakenFromAnOpenedBox() {
+        var doc = PantryDocument()
+        val (withSpace, fridge) = editor.addSpace(doc, "Frigorifero")
+        doc = withSpace
+        val (withYogurt, yogurt) = editor.addItem(doc, "Yogurt", fridge, 1, boxed = true, size = Measure(500.0, MeasureUnit.Gram))
+        doc = editor.open(withYogurt, yogurt, today).first
+        val opened = doc.items.single { it.id == yogurt }
+        fun said(heard: String, language: VoiceLanguage = Italian) = understandVoice(heard, language, doc, Memory())
+        assertEquals(VoiceCommand.Use(opened, 1, Measure(100.0, MeasureUnit.Gram)), said("ho mangiato 100 grammi di yogurt"))
+        assertEquals(VoiceCommand.Use(opened, 1, Measure(100.0, MeasureUnit.Gram)), said("ho mangiato un etto di yogurt"))
+        assertEquals(VoiceCommand.Use(opened, 1, Measure(150.0, MeasureUnit.Gram)), said("I ate 150 grams of yogurt", English))
     }
 }

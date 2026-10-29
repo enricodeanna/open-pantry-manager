@@ -1,5 +1,6 @@
 package eu.studiodeanna.openpantrymanager.memory
 
+import eu.studiodeanna.openpantrymanager.costs.Measure
 import eu.studiodeanna.openpantrymanager.model.nameKey
 import eu.studiodeanna.openpantrymanager.voice.VoiceAction
 import kotlinx.datetime.LocalDate
@@ -9,10 +10,11 @@ import kotlin.math.roundToInt
 
 /**
  * What the app has learned from the user: where each food usually goes, where it is usually moved to
- * from each space, how long it usually keeps, whether it comes in boxes and how long a box lasts once
- * opened, what it is called on the shopping list and in which sublist, which items of the list were
- * put away already, what the lines of shop receipts mean, and the phrases the user taught voice
- * commands. A shared pantry shares it too.
+ * from each space, how long it usually keeps, whether it comes in boxes, how big they are and how long
+ * one lasts once opened, how much is used at a time, what it is called on the shopping list and in which
+ * sublist, which group of like products its costs count under, which items of the list were put away
+ * already, what the lines of shop receipts mean and which shop they come from, and the phrases the user
+ * taught voice commands. A shared pantry shares it too.
  *
  * Habits are weights that grow by one each time and fade a little whenever something else happens to
  * the same food, so a new habit takes over after being repeated a few times.
@@ -39,6 +41,8 @@ data class Memory(
      * stamp then: ticked again later, an item is new again.
      */
     val fromList: Map<String, Long> = emptyMap(),
+    /** Shops by the [receiptKey] of the receipt row that names them ("COOP ALLEANZA 3.0") → as the user calls them ("Coop"). */
+    val shops: Map<String, String> = emptyMap(),
     /** By learned thing (see [entries]): its last change. Things learned before stamping have none. */
     val stamps: Map<String, Stamp> = emptyMap(),
 )
@@ -70,7 +74,16 @@ data class Food(
     val boxed: Boolean? = null,
     /** How many days an opened box of it lasted, the last times one was finished, newest last. */
     val openLasts: List<Int> = emptyList(),
+    /** What one of its boxes holds, as last said or read. */
+    val size: Measure? = null,
+    /** How much of an opened box was used at a time, the last times, in the unit of its size; newest last. */
+    val servings: List<Double> = emptyList(),
+    /** The group of like products its costs count under ("Fiocchi di latte" for "Cottage cheese"), when the user set one. */
+    val group: String? = null,
 )
+
+/** How much of an opened box is usually used at a time: the middle of the last times; null before any. */
+fun Food.usualServing(): Double? = if (servings.isEmpty()) null else servings.sorted()[servings.size / 2]
 
 /** How long an opened box of this food usually lasts, in days: the middle of the last times; null before two. */
 fun Food.usualOpenDays(): Int? = if (openLasts.size < 2) null else typicalKeep(openLasts)
@@ -149,6 +162,37 @@ fun Memory.foodOnList(text: String): Food? =
  */
 fun Memory.handledFromList(handled: Map<String, Long>, onList: Set<String>): Memory =
     copy(fromList = fromList.filterKeys { it in onList } + handled)
+
+/** Remembers that a box of [name] holds [size]. */
+fun Memory.sized(name: String, size: Measure): Memory =
+    if (food(name)?.size == size) this else withFood(name) { it.copy(size = size) }
+
+/** Remembers that [amount] of an opened box of [name] was used at once. */
+fun Memory.served(name: String, amount: Double): Memory =
+    withFood(name) { it.copy(servings = (it.servings + amount).takeLast(KEEPS_COUNTED)) }
+
+/** Puts [name]'s costs in the group [group] of like products; null: in the group it falls in by itself. */
+fun Memory.grouped(name: String, group: String?): Memory = withFood(name) { it.copy(group = group?.trim()?.takeIf { g -> g.isNotEmpty() }) }
+
+/**
+ * The group of like products [name]'s costs count under: the one the user set; else the name it goes on
+ * the shopping list by, which several foods may share ("Latte" for "Latte p.s." and "Latte intero"); else
+ * its own name.
+ */
+fun Memory.groupOf(name: String): String = food(name)?.let { it.group ?: it.shoppingName ?: it.name } ?: name.trim()
+
+/** Remembers which sublist of the shopping list [name] goes in: "" for none. */
+fun Memory.inSublist(name: String, sublist: String): Memory = withFood(name) { it.copy(sublist = sublist.trim()) }
+
+/** The shop the receipt row [row] names, as the user called it; null if not known yet. */
+fun Memory.shopFor(row: String): String? = shops[receiptKey(row)]
+
+/** Remembers that the receipt row [row] names the shop the user calls [shop]. */
+fun Memory.shopIs(row: String, shop: String): Memory {
+    val key = receiptKey(row)
+    if (key.isEmpty() || shop.isBlank()) return this
+    return copy(shops = shops + (key to shop.trim()))
+}
 
 /** Whether [name] comes in boxes, as far as the app knows. */
 fun Memory.isBoxed(name: String): Boolean = food(name)?.boxed == true
