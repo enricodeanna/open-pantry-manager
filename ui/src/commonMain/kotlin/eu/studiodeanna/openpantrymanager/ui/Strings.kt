@@ -45,6 +45,7 @@ interface Strings {
     val search: String
     val searchFood: String
     val closeSearch: String
+    val clearSearch: String
     fun noFoodMatches(query: String): String
     /** Offered when nothing matches a search. */
     fun addNamedToPantry(name: String): String
@@ -361,6 +362,7 @@ object EnglishStrings : Strings {
     override val search = "Search"
     override val searchFood = "Search food"
     override val closeSearch = "Close search"
+    override val clearSearch = "Clear"
     override fun noFoodMatches(query: String) = "No food called “$query”."
     override fun addNamedToPantry(name: String) = "Add “$name” to the pantry"
     override fun putNamedOnList(name: String) = "Put “$name” on the shopping list"
@@ -689,6 +691,7 @@ object ItalianStrings : Strings {
     override val search = "Cerca"
     override val searchFood = "Cerca un alimento"
     override val closeSearch = "Chiudi la ricerca"
+    override val clearSearch = "Cancella"
     override fun noFoodMatches(query: String) = "Nessun alimento si chiama “$query”."
     override fun addNamedToPantry(name: String) = "Aggiungi “$name” alla dispensa"
     override fun putNamedOnList(name: String) = "Metti “$name” nella lista della spesa"

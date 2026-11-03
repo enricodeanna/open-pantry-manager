@@ -348,6 +348,12 @@ fun PantryScreen(
                             value = q,
                             onValueChange = { query = it },
                             placeholder = { Text(strings.searchFood) },
+                            // Clears what was typed at once; the search stays open for the next word.
+                            trailingIcon = {
+                                if (q.isNotEmpty()) {
+                                    IconButton(onClick = { query = "" }) { Icon(AppIcons.Close, contentDescription = strings.clearSearch) }
+                                }
+                            },
                             singleLine = true,
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,

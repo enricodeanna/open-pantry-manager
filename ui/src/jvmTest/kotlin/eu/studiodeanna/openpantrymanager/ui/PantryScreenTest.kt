@@ -128,6 +128,12 @@ class PantryScreenTest {
         onNode(hasSetTextAction()).performTextInput("burro")
         onNodeWithText("Nessun alimento si chiama “burro”.").assertExists()
         onNodeWithText("Metti “Burro” nella lista della spesa").assertExists()
+        // The X clears what was typed at once, and the search stays open.
+        onNodeWithContentDescription("Cancella").performClick()
+        onNodeWithText("Nessun alimento si chiama “burro”.").assertDoesNotExist()
+        onNodeWithContentDescription("Cancella").assertDoesNotExist()
+        onNodeWithContentDescription("Chiudi la ricerca").assertExists()
+        onNode(hasSetTextAction()).performTextInput("burro")
         onNodeWithText("Aggiungi “Burro” alla dispensa").performClick()
         onNodeWithText("Aggiungi alimento").assertExists()
         onAllNodes(hasSetTextAction()).filterToOne(hasText("Burro")).assertExists()
