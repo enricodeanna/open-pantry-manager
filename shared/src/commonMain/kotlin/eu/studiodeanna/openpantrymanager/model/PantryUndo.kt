@@ -32,6 +32,8 @@ sealed interface PantryAction {
     data class PutAway(val count: Int) : PantryAction
     data class PutAwayFromList(val count: Int) : PantryAction
     data class UsedAmount(val name: String, val amount: Measure) : PantryAction
+    data class MarkedLeftover(val name: String, val leftover: Boolean) : PantryAction
+    data class Cooked(val name: String) : PantryAction
     data class AddedPurchase(val name: String) : PantryAction
     data class EditedPurchase(val name: String) : PantryAction
     data class DeletedPurchase(val name: String) : PantryAction

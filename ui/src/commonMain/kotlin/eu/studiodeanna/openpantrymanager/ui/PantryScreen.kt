@@ -3,6 +3,7 @@ package eu.studiodeanna.openpantrymanager.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +102,7 @@ import eu.studiodeanna.openpantrymanager.UndoStep
 import eu.studiodeanna.openpantrymanager.checklist.Item
 import eu.studiodeanna.openpantrymanager.costs.Measure
 import eu.studiodeanna.openpantrymanager.memory.Memory
+import eu.studiodeanna.openpantrymanager.memory.Recipe
 import eu.studiodeanna.openpantrymanager.memory.food
 import eu.studiodeanna.openpantrymanager.memory.usualServing
 import eu.studiodeanna.openpantrymanager.memory.phrasesIn
@@ -129,6 +131,7 @@ private sealed interface Dialog {
     data class DeleteSpace(val space: Space) : Dialog
     data class Edit(val item: PantryItem) : Dialog
     data class Move(val item: PantryItem) : Dialog
+    data object RecipeName : Dialog
 
     /**
      * How much of the opened box [item] was used; [opening]: it was opened just now. [thenShopping]:
@@ -155,6 +158,10 @@ fun PantryScreen(
     onShopping: () -> Unit,
     /** Shows what the food cost. */
     onCosts: () -> Unit = {},
+    /** Makes the recipe of this name: what went into it is picked from the pantry. */
+    onCook: (String) -> Unit = {},
+    /** Lists the recipes made, to change them. */
+    onRecipes: () -> Unit = {},
     /** Opens the receipt photos; null where receipts cannot be read. */
     onScan: (() -> Unit)?,
     /** Hears voice commands; null where the platform cannot. */
@@ -291,6 +298,11 @@ fun PantryScreen(
         return Obeyed.Done
     }
 
+    /** A long press on an item: it is leftovers now, or not any more. */
+    fun toggleLeftover(item: PantryItem) {
+        announce(texts.markedLeftover(item.name, !item.leftover), repository.setLeftover(item.id, !item.leftover))
+    }
+
     /** A tap on an item's count: one used; for a box of known size, opened, and then how much was used is asked. */
     fun useOne(item: PantryItem) {
         if (!item.boxed || item.size == null) return took(item, repository.useOne(item.id))
@@ -386,6 +398,7 @@ fun PantryScreen(
                             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                 // Searching is used more, so it has the icon; with undo and redo, one more would not fit beside the title.
                                 MenuItem(strings.shoppingList) { menu = false; onShopping() }
+                                MenuItem(strings.recipes) { menu = false; onRecipes() }
                                 MenuItem(strings.costs) { menu = false; onCosts() }
                                 MenuItem(strings.addSpace) { menu = false; dialog = Dialog.AddSpace }
                                 if (spaces.isNotEmpty()) {
@@ -417,6 +430,13 @@ fun PantryScreen(
                         }
                     }
                     ExtendedFloatingActionButton(
+                        onClick = { dialog = Dialog.RecipeName },
+                        icon = { Icon(AppIcons.Recipe, contentDescription = null) },
+                        text = { Text(strings.addRecipe) },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    ExtendedFloatingActionButton(
                         onClick = { dialog = Dialog.AddFood(null) },
                         icon = { Icon(AppIcons.Add, contentDescription = null) },
                         text = { Text(strings.addFood) },
@@ -436,7 +456,8 @@ fun PantryScreen(
             }
             LazyColumn(
                 modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth(),
-                contentPadding = PaddingValues(bottom = 96.dp),
+                // Room under the last food for the buttons.
+                contentPadding = PaddingValues(bottom = 176.dp),
             ) {
                 (sharing?.sync as? SyncState.Failed)?.let { failed ->
                     item(key = "sharing-problem") {
@@ -460,7 +481,10 @@ fun PantryScreen(
                 }
                 val q = query
                 if (q != null) {
-                    searchResults(spaces, grouped, q, today, memory, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }, onMove = { dialog = Dialog.Move(it) })
+                    searchResults(
+                        spaces, grouped, q, today, memory,
+                        onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }, onMove = { dialog = Dialog.Move(it) }, onLeftover = ::toggleLeftover,
+                    )
                     if (q.isNotBlank() && spaces.none { space -> grouped[space.id].orEmpty().any { matchesName(it.name, q) } }) {
                         // Not in the pantry: put it there, or on the shopping list, as the app knows it.
                         val name = repository.food(q)?.name ?: q.trim().replaceFirstChar { it.uppercase() }
@@ -511,9 +535,10 @@ fun PantryScreen(
                         )
                     }
                     if (!folded) {
-                        itemRows(items, today, memory, SECTION_INDENT, onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }) {
-                            dialog = Dialog.Move(it)
-                        }
+                        itemRows(
+                            items, today, memory, SECTION_INDENT,
+                            onUse = ::useOne, onEdit = { dialog = Dialog.Edit(it) }, onMove = { dialog = Dialog.Move(it) }, onLeftover = ::toggleLeftover,
+                        )
                         if (id != null) {
                             item(key = "add-$id") {
                                 AddItemRow(
@@ -612,6 +637,13 @@ fun PantryScreen(
                     took(item, repository.useAmount(item.id, amount))
                 }
             }
+        }
+        Dialog.RecipeName -> RecipeNameDialog(
+            known = remember(memory) { memory.recipes.values.sortedWith(compareByDescending<Recipe> { it.last }.thenByDescending { it.made }) },
+            onDismiss = { dialog = null },
+        ) { name ->
+            dialog = null
+            onCook(name)
         }
         is Dialog.Move -> MoveDialog(d.item, spaces, repository.moveFor(d.item), onDismiss = { dialog = null }) { space, count ->
             dialog = null
@@ -813,9 +845,13 @@ private fun LazyListScope.itemRows(
     onUse: (PantryItem) -> Unit,
     onEdit: (PantryItem) -> Unit,
     onMove: (PantryItem) -> Unit,
+    onLeftover: (PantryItem) -> Unit,
 ) {
     items(items, key = { it.id }) { item ->
-        ItemRow(item, today, memory.usedUpBy(item), indent, onUse = { onUse(item) }, onEdit = { onEdit(item) }, onMove = { onMove(item) })
+        ItemRow(
+            item, today, memory.usedUpBy(item), indent,
+            onUse = { onUse(item) }, onEdit = { onEdit(item) }, onMove = { onMove(item) }, onLeftover = { onLeftover(item) },
+        )
     }
 }
 
@@ -829,6 +865,7 @@ private fun LazyListScope.searchResults(
     onUse: (PantryItem) -> Unit,
     onEdit: (PantryItem) -> Unit,
     onMove: (PantryItem) -> Unit,
+    onLeftover: (PantryItem) -> Unit,
 ) {
     for (space in spaces) {
         val found = grouped[space.id].orEmpty().filter { matchesName(it.name, query) }
@@ -841,7 +878,7 @@ private fun LazyListScope.searchResults(
                 modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
             )
         }
-        itemRows(found, today, memory, 0.dp, onUse, onEdit, onMove)
+        itemRows(found, today, memory, 0.dp, onUse, onEdit, onMove, onLeftover)
     }
 }
 
@@ -855,9 +892,17 @@ private fun ItemRow(
     onUse: () -> Unit,
     onEdit: () -> Unit,
     onMove: () -> Unit,
+    onLeftover: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(start = 4.dp + indent),
+        Modifier.fillMaxWidth()
+            // A long press marks leftovers, and another unmarks them.
+            .combinedClickable(
+                onClick = onEdit,
+                onLongClick = onLeftover,
+                onLongClickLabel = if (item.leftover) strings.unmarkLeftover(item.name) else strings.markLeftover(item.name),
+            )
+            .padding(start = 4.dp + indent),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CountBadge(item, onUse)
@@ -869,16 +914,23 @@ private fun ItemRow(
                 strings.openedAgo(day.daysUntil(today)) + lasts + left
             }
             val expiry = item.expires?.let { strings.expiry(it, today) }
-            if (opened != null || expiry != null) {
+            if (opened != null || expiry != null || item.leftover) {
                 val variant = MaterialTheme.colorScheme.onSurfaceVariant
                 val expiryColor = item.expires?.let { expiryColor(it, today) } ?: variant
                 val openedColor = usedUpBy?.let { expiryColor(it, today) } ?: variant
+                val leftoverColor = MaterialTheme.colorScheme.secondary
                 Text(
                     buildAnnotatedString {
+                        if (item.leftover) {
+                            withStyle(SpanStyle(color = leftoverColor, fontWeight = FontWeight.SemiBold)) { append(strings.leftover) }
+                            if (opened != null || expiry != null) withStyle(SpanStyle(color = variant)) { append(" · ") }
+                        }
                         opened?.let { withStyle(SpanStyle(color = openedColor)) { append(it) } }
                         if (opened != null && expiry != null) withStyle(SpanStyle(color = variant)) { append(" · ") }
                         expiry?.let { text ->
-                            withStyle(SpanStyle(color = expiryColor)) { append(if (opened != null) text.replaceFirstChar { it.lowercase() } else text) }
+                            withStyle(SpanStyle(color = expiryColor)) {
+                                append(if (opened != null || item.leftover) text.replaceFirstChar { it.lowercase() } else text)
+                            }
                         }
                     },
                     style = MaterialTheme.typography.labelMedium,

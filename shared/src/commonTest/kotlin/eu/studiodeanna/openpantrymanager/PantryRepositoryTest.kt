@@ -9,6 +9,8 @@ import eu.studiodeanna.openpantrymanager.costs.Measure
 import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
 import eu.studiodeanna.openpantrymanager.costs.costLines
 import eu.studiodeanna.openpantrymanager.costs.livePurchases
+import eu.studiodeanna.openpantrymanager.memory.Ingredient
+import eu.studiodeanna.openpantrymanager.memory.Kept
 import eu.studiodeanna.openpantrymanager.model.PantryAction
 import eu.studiodeanna.openpantrymanager.model.UndoState
 import eu.studiodeanna.openpantrymanager.model.item
@@ -486,5 +488,113 @@ class PantryRepositoryTest {
         assertEquals(3, repo.costs.value.livePurchases().size)
         assertEquals(PantryAction.DeletedPurchase("Cottage cheese"), repo.undo())
         assertEquals(4, repo.costs.value.livePurchases().size)
+    }
+
+    @Test
+    fun leftoversAreMarkedApartFromTheSameFoodBought() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        repo.addItem("Lasagne", fridge)
+        val lasagne = repo.pantry.value.liveItems().single()
+        repo.setLeftover(lasagne.id, true)
+        assertEquals(true, repo.pantry.value.item(lasagne.id)?.leftover)
+        // More bought or made is not counted with the leftovers.
+        repo.addItem("Lasagne", fridge)
+        assertEquals(listOf(false, true), repo.pantry.value.liveItems().map { it.leftover }.sorted())
+        // Unmarked; undone, as before.
+        repo.setLeftover(lasagne.id, false)
+        assertEquals(false, repo.pantry.value.item(lasagne.id)?.leftover)
+        assertEquals(PantryAction.MarkedLeftover("Lasagne", false), repo.undo())
+        assertEquals(true, repo.pantry.value.item(lasagne.id)?.leftover)
+        // Then the second lasagne, then the marking.
+        repo.undo()
+        assertEquals(PantryAction.MarkedLeftover("Lasagne", true), repo.undo())
+        assertEquals(false, repo.pantry.value.item(lasagne.id)?.leftover)
+    }
+
+    @Test
+    fun aRecipeTakesItsIngredientsInOneEditAndIsSuggestedNextTime() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        val cabinet = repo.addSpace("Cabinet")
+        repo.addItem("Uova", fridge, 6)
+        repo.addItem("Farina", cabinet, 2, boxed = true, size = Measure(1000.0, MeasureUnit.Gram))
+        repo.addItem("Latte", fridge, 1, boxed = true, size = Measure(1000.0, MeasureUnit.Millilitre))
+        val items = repo.pantry.value.liveItems().associateBy { it.name }
+        repo.useOne(items.getValue("Latte").id)
+        val milk = repo.pantry.value.liveItems().single { it.name == "Latte" }
+
+        val cooked = repo.cook(
+            "Crêpes",
+            listOf(
+                RecipeUse(items.getValue("Uova").id, 2),
+                RecipeUse(items.getValue("Farina").id, 1, whole = false, amount = 250.0),
+                RecipeUse(milk.id, 1, whole = true),
+            ),
+        )
+        val now = repo.pantry.value.liveItems()
+        assertEquals(4, now.single { it.name == "Uova" }.quantity)
+        assertEquals(listOf(null to 1, 750.0 to 1), now.filter { it.name == "Farina" }.map { it.left to it.quantity }.sortedBy { it.first ?: 0.0 })
+        assertEquals(null, now.firstOrNull { it.name == "Latte" })
+        // The milk was already open: nothing ran out that was not open.
+        assertEquals(emptyList(), cooked.ranOut)
+        val recipe = repo.recipe("crepes")!!
+        assertEquals(
+            listOf(Ingredient("Uova", 2), Ingredient("Farina", 1, whole = false, amount = 250.0), Ingredient("Latte", 1)),
+            recipe.ingredients,
+        )
+        assertEquals(1 to LocalDate(2026, 10, 14), recipe.made to recipe.last)
+
+        // Undone in one go, and the recipe with it.
+        assertEquals(PantryAction.Cooked("Crêpes"), repo.undo(cooked.step!!))
+        assertEquals(6, repo.pantry.value.liveItems().single { it.name == "Uova" }.quantity)
+        assertNull(repo.recipe("Crêpes"))
+        repo.redo()
+
+        // Next time: the eggs, the opened flour first, and the milk is missing.
+        val suggestion = repo.suggestFor("CREPES")!!
+        val flour = repo.pantry.value.liveItems().single { it.name == "Farina" && it.opened != null }
+        val eggs = repo.pantry.value.liveItems().single { it.name == "Uova" }
+        assertEquals(listOf(RecipeUse(eggs.id, 2), RecipeUse(flour.id, 1, whole = false, amount = 250.0)), suggestion.uses)
+        assertEquals(listOf("Latte"), suggestion.missing.map { it.food })
+        assertEquals(listOf("Crêpes"), repo.completeRecipe("cr").map { it.name })
+
+        // Written by hand, renamed and changed; then forgotten.
+        repo.saveRecipe(recipe.copy(name = "Crespelle", ingredients = recipe.ingredients.take(1)), was = "Crêpes")
+        assertNull(repo.recipe("Crêpes"))
+        assertEquals(listOf("Uova"), repo.recipe("crespelle")?.ingredients?.map { it.food })
+        repo.deleteRecipe("Crespelle")
+        assertNull(repo.recipe("Crespelle"))
+    }
+
+    @Test
+    fun whatIsLeftOfADishOrAllOfItMadeAheadGoesWhereSaid() = runTest {
+        val repo = repository()
+        repo.load()
+        val fridge = repo.addSpace("Fridge")
+        val freezer = repo.addSpace("Freezer")
+        repo.addItem("Pasta", fridge, 2)
+        val pasta = repo.pantry.value.liveItems().single()
+
+        // Leftovers, in the fridge.
+        val first = repo.cook("Lasagne", listOf(RecipeUse(pasta.id, 1)), Dish(fridge, 2, leftover = true))
+        val leftovers = repo.pantry.value.liveItems().single { it.name == "Lasagne" }
+        assertEquals(Triple(fridge, 2, true), Triple(leftovers.space, leftovers.quantity, leftovers.leftover))
+        assertEquals(Kept(leftover = true, portions = 2), repo.recipe("Lasagne")?.kept)
+        // Undone with the recipe.
+        repo.undo(first.step!!)
+        assertEquals(listOf("Pasta"), repo.pantry.value.liveItems().map { it.name })
+        repo.redo()
+
+        // Made ahead, the whole of it, in the freezer: not leftovers, and the freezer is where it goes from now on.
+        repo.cook("Lasagne", emptyList(), Dish(freezer, 4, LocalDate(2027, 1, 14), leftover = false))
+        val ahead = repo.pantry.value.liveItems().single { it.name == "Lasagne" && !it.leftover }
+        assertEquals(Triple(freezer, 4, LocalDate(2027, 1, 14)), Triple(ahead.space, ahead.quantity, ahead.expires))
+        assertEquals(freezer, repo.placeFor("lasagne"))
+        // Made from nothing the pantry had, the recipe keeps its ingredients.
+        assertEquals(listOf("Pasta"), repo.recipe("Lasagne")?.ingredients?.map { it.food })
+        assertEquals(2, repo.recipe("Lasagne")?.made)
     }
 }

@@ -95,4 +95,3 @@ class ReceiptScreenTest {
         assertEquals(Triple(139L, "Conad", Measure(1000.0, MeasureUnit.Millilitre)), Triple(purchase.cents, purchase.shop, purchase.amount))
     }
 }
-

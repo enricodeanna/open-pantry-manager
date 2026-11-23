@@ -118,6 +118,12 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
         return doc.withItem(edited)
     }
 
+    /** Marks an item as leftovers, or not. */
+    fun setLeftover(doc: PantryDocument, id: String, leftover: Boolean): PantryDocument {
+        val item = doc.item(id)?.takeIf { it.leftover != leftover } ?: return doc
+        return doc.withItem(item.copy(leftover = leftover, at = doc.stamp(), by = device))
+    }
+
     /**
      * Takes [amount] (in the unit of its size) out of an opened box of known size: what is left goes
      * down, and so does the count of boxes holding it; when nothing is left, it leaves the pantry.
@@ -251,7 +257,8 @@ class PantryEditor(private val device: String, private val now: () -> Long) {
 
     private fun PantryDocument.sameFood(name: String, space: String, expires: LocalDate?, opened: LocalDate?, size: Measure?): PantryItem? =
         liveItems().firstOrNull {
-            it.space == space && it.expires == expires && it.opened == opened && it.size == size && nameKey(it.name) == nameKey(name)
+            // Leftovers are a meal of their own, not counted with the same food bought.
+            it.space == space && it.expires == expires && it.opened == opened && it.size == size && !it.leftover && nameKey(it.name) == nameKey(name)
         }
 
     private companion object {

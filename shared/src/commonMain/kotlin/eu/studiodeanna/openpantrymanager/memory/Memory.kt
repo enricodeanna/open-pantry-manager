@@ -13,8 +13,8 @@ import kotlin.math.roundToInt
  * from each space, how long it usually keeps, whether it comes in boxes, how big they are and how long
  * one lasts once opened, how much is used at a time, what it is called on the shopping list and in which
  * sublist, which group of like products its costs count under, which items of the list were put away
- * already, what the lines of shop receipts mean and which shop they come from, and the phrases the user
- * taught voice commands. A shared pantry shares it too.
+ * already, what the lines of shop receipts mean and which shop they come from, the phrases the user
+ * taught voice commands, and the recipes made. A shared pantry shares it too.
  *
  * Habits are weights that grow by one each time and fade a little whenever something else happens to
  * the same food, so a new habit takes over after being repeated a few times.
@@ -43,6 +43,8 @@ data class Memory(
     val fromList: Map<String, Long> = emptyMap(),
     /** Shops by the [receiptKey] of the receipt row that names them ("COOP ALLEANZA 3.0") → as the user calls them ("Coop"). */
     val shops: Map<String, String> = emptyMap(),
+    /** Recipes by the [nameKey] of their name: what goes into each, as made last time or as edited. */
+    val recipes: Map<String, Recipe> = emptyMap(),
     /** By learned thing (see [entries]): its last change. Things learned before stamping have none. */
     val stamps: Map<String, Stamp> = emptyMap(),
 )
@@ -81,6 +83,56 @@ data class Food(
     /** The group of like products its costs count under ("Fiocchi di latte" for "Cottage cheese"), when the user set one. */
     val group: String? = null,
 )
+
+/**
+ * A recipe: its [name], what goes into it, how often and when it was last made, and what of it was put
+ * away last time ([kept]), to offer the same.
+ */
+@Serializable
+data class Recipe(
+    val name: String,
+    val ingredients: List<Ingredient> = emptyList(),
+    val made: Int = 0,
+    val last: LocalDate? = null,
+    val kept: Kept? = null,
+)
+
+/** What of a dish was put away: [portions] of it, as [leftover]s or the whole dish, made ahead. */
+@Serializable
+data class Kept(val leftover: Boolean, val portions: Int = 1)
+
+/**
+ * What of a food goes into a recipe: [quantity] pieces, or boxes; for food in boxes, whether they are
+ * used up ([whole]) or opened with some left, and then how much is used ([amount], in the unit of the
+ * box's size), if said.
+ */
+@Serializable
+data class Ingredient(val food: String, val quantity: Int = 1, val whole: Boolean = true, val amount: Double? = null)
+
+/** The recipe called [name], if made or written before. */
+fun Memory.recipe(name: String): Recipe? = recipes[nameKey(name)]
+
+/** Known recipes whose name [text] could be the start of, the most made first. */
+fun Memory.completeRecipe(text: String, limit: Int = 6): List<Recipe> {
+    val query = nameKey(text)
+    if (query.isEmpty()) return emptyList()
+    return recipes.entries
+        .filter { (key, _) -> key.startsWith(query) || key.split(' ').any { it.startsWith(query) } }
+        .sortedWith(compareBy({ it.key != query }, { -it.value.made }))
+        .take(limit)
+        .map { it.value }
+}
+
+/** Remembers [recipe] as written, in place of the one called [was] (renamed), or of the same name. */
+fun Memory.withRecipe(recipe: Recipe, was: String = recipe.name): Memory {
+    val key = nameKey(recipe.name)
+    if (key.isEmpty()) return this
+    val clean = recipe.copy(name = recipe.name.trim(), ingredients = recipe.ingredients.filter { nameKey(it.food).isNotEmpty() })
+    return copy(recipes = recipes - nameKey(was) + (key to clean))
+}
+
+/** Forgets the recipe called [name]. */
+fun Memory.withoutRecipe(name: String): Memory = copy(recipes = recipes - nameKey(name))
 
 /** How much of an opened box is usually used at a time: the middle of the last times; null before any. */
 fun Food.usualServing(): Double? = if (servings.isEmpty()) null else servings.sorted()[servings.size / 2]

@@ -21,6 +21,12 @@ import eu.studiodeanna.openpantrymanager.costs.Purchase
 import eu.studiodeanna.openpantrymanager.costs.merge
 import eu.studiodeanna.openpantrymanager.costs.pruned
 import eu.studiodeanna.openpantrymanager.memory.Food
+import eu.studiodeanna.openpantrymanager.memory.Kept
+import eu.studiodeanna.openpantrymanager.memory.Recipe
+import eu.studiodeanna.openpantrymanager.memory.completeRecipe
+import eu.studiodeanna.openpantrymanager.memory.recipe
+import eu.studiodeanna.openpantrymanager.memory.withRecipe
+import eu.studiodeanna.openpantrymanager.memory.withoutRecipe
 import eu.studiodeanna.openpantrymanager.memory.Memory
 import eu.studiodeanna.openpantrymanager.memory.changedTo
 import eu.studiodeanna.openpantrymanager.memory.combinedWith
@@ -166,6 +172,9 @@ data class Taken(
     /** What is left of an opened box of known size, in its unit. */
     val leftAmount: Measure? = null,
 )
+
+/** What making a recipe did: undone by [step]; the foods none of which is left unopened now, to buy again. */
+data class Cooked(val step: UndoStep?, val ranOut: List<String>)
 
 /**
  * A receipt as read, to review: its [entries], the [total] it prints, the row of its header that names
@@ -466,6 +475,77 @@ class PantryRepository(
             if (all) lastedOpened(finished, served) else served
         }.let { it.copy(leftAmount = _pantry.value.item(id)?.leftAmount()) }
     }
+
+    /** Marks an item as leftovers, or not. Returns what undoes it. */
+    fun setLeftover(id: String, leftover: Boolean): UndoStep? {
+        val item = _pantry.value.item(id) ?: return null
+        return edit(PantryAction.MarkedLeftover(item.name, leftover), { editor.setLeftover(it, id, leftover) })
+    }
+
+    // Recipes
+
+    /** The recipe called [name], if made or written before. */
+    fun recipe(name: String): Recipe? = _memory.value.recipe(name)
+
+    /** Known recipes whose name [text] could be the start of. */
+    fun completeRecipe(text: String): List<Recipe> = _memory.value.completeRecipe(text)
+
+    /** What the recipe [name], made before, would take from the pantry now, and what of it the pantry lacks. */
+    fun suggestFor(name: String): Suggestion? = recipe(name)?.let { suggestFor(it, _pantry.value, _memory.value) }
+
+    /**
+     * Makes the recipe [name] with [uses] of the pantry's items, in one edit, which can be undone: pieces
+     * and boxes used up leave, boxes used in part are opened and, of a known size, lose what was used; and
+     * what of the [dish] is kept goes in the pantry, leftovers or the whole of it. Learns the recipe as
+     * made (its ingredients, once more made, today, what was kept), where the dish goes and how long it
+     * keeps, how much of each food is used at a time, and how long opened boxes lasted.
+     */
+    fun cook(name: String, uses: List<RecipeUse>, dish: Dish? = null): Cooked {
+        val before = _pantry.value
+        val used = uses.mapNotNull { use -> before.item(use.item)?.let { it to use } }
+        val day = today()
+        val action = PantryAction.Cooked(name.trim())
+        val step = edit(action, { doc ->
+            val cooked = used.fold(doc) { d, (item, use) -> applyUse(d, item, use, day) }
+            if (dish == null || dish.space !in liveSpaces()) cooked else {
+                val (withDish, id) = editor.addItem(cooked, name, dish.space, dish.portions, dish.expires, day)
+                if (dish.leftover) editor.setLeftover(withDish, id, true) else withDish
+            }
+        }) { memory ->
+            val learned = used.fold(memory) { m, (item, use) ->
+                when {
+                    item.boxed && !use.whole && use.amount != null && item.size != null -> m.served(item.name, use.amount)
+                    item.boxed && use.whole && item.opened != null -> lastedOpened(item, m)
+                    else -> m
+                }
+            }
+            val known = learned.recipe(name)
+            val kept = dish?.let { Kept(it.leftover, it.portions) }
+            // A recipe made from what was not in the pantry keeps the ingredients it had.
+            val ingredients = ingredientsOf(used).ifEmpty { known?.ingredients.orEmpty() }
+            val placed = dish?.let { learned.placed(name, it.space, now(), day, it.expires, day) } ?: learned
+            placed.withRecipe(Recipe(name.trim(), ingredients, (known?.made ?: 0) + 1, day, kept))
+        }
+        val after = _pantry.value
+        return Cooked(step, used.map { it.first.name }.distinctBy(::nameKey).filter { ranOut(it, before, after) })
+    }
+
+    /** One item's part in a recipe: used up, or opened, and some of it used. */
+    private fun applyUse(doc: PantryDocument, item: PantryItem, use: RecipeUse, day: LocalDate): PantryDocument = when {
+        !item.boxed || use.whole -> editor.useSome(doc, item.id, use.quantity)
+        item.opened == null -> {
+            val (opened, box) = editor.open(doc, item.id, day, 1)
+            if (use.amount != null && item.size != null) editor.useAmount(opened, box, use.amount) else opened
+        }
+        use.amount != null && item.size != null -> editor.useAmount(doc, item.id, use.amount)
+        else -> doc
+    }
+
+    /** Writes the recipe [recipe] down, in place of the one called [was] when renamed; here and on every phone sharing the pantry. */
+    fun saveRecipe(recipe: Recipe, was: String = recipe.name) = learnNow(_memory.value.withRecipe(recipe, was))
+
+    /** Forgets the recipe called [name]. */
+    fun deleteRecipe(name: String) = learnNow(_memory.value.withoutRecipe(name))
 
     /** What is left of an opened box of known size. */
     private fun PantryItem.leftAmount(): Measure? = size?.let { size -> left?.let { Measure(it, size.unit) } }

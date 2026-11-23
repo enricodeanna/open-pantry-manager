@@ -149,6 +149,37 @@ interface Strings {
     fun totalMatches(total: String): String
     fun totalDiffers(sum: String, total: String): String
 
+    // Leftovers and recipes
+    val leftover: String
+    fun markLeftover(name: String): String
+    fun unmarkLeftover(name: String): String
+    fun markedLeftover(name: String, leftover: Boolean): String
+    val addRecipe: String
+    val whatDidYouMake: String
+    val recipeName: String
+    val next: String
+    val tickIngredients: String
+    fun asLastTime(count: Int): String
+    fun notInPantry(names: String): String
+    val usedUp: String
+    val someLeft: String
+    val amountUsed: String
+    fun cooked(name: String): String
+    val ranOutTitle: String
+    val putOnListQuestion: String
+    val recipes: String
+    val noRecipes: String
+    fun madeTimes(count: Int, last: String?): String
+    val ingredients: String
+    val addIngredient: String
+    val makeIt: String
+    fun removeIngredient(name: String): String
+    fun ingredientOpened(amount: String?): String
+    val whatIsKept: String
+    val nothing: String
+    val wholeDish: String
+    val portions: String
+
     // Numbers
     /** An amount of money, given in cents: "1,82 €". */
     fun money(cents: Long): String
@@ -334,6 +365,8 @@ object EnglishStrings : Strings {
         is PantryAction.UsedSome -> "used ${action.count} “${action.name}”"
         is PantryAction.Opened -> "opened “${action.name}”"
         is PantryAction.UsedAmount -> "used ${measure(action.amount)} of “${action.name}”"
+        is PantryAction.MarkedLeftover -> if (action.leftover) "marked “${action.name}” as leftovers" else "unmarked “${action.name}” as leftovers"
+        is PantryAction.Cooked -> "made “${action.name}”"
         is PantryAction.AddedPurchase -> "added the price of “${action.name}”"
         is PantryAction.EditedPurchase -> "changed the price of “${action.name}”"
         is PantryAction.DeletedPurchase -> "deleted the price of “${action.name}”"
@@ -458,6 +491,37 @@ object EnglishStrings : Strings {
     override fun usedAmount(name: String, left: String) = "$name: $left left"
     override fun totalMatches(total: String) = "Total $total, as on the receipt."
     override fun totalDiffers(sum: String, total: String) = "The prices add up to $sum, the receipt says $total: check them."
+
+    override val leftover = "Leftovers"
+    override fun markLeftover(name: String) = "Mark $name as leftovers"
+    override fun unmarkLeftover(name: String) = "$name not leftovers any more"
+    override fun markedLeftover(name: String, leftover: Boolean) = if (leftover) "$name: leftovers" else "$name: not leftovers any more"
+    override val addRecipe = "Add recipe"
+    override val whatDidYouMake = "What did you make?"
+    override val recipeName = "Recipe"
+    override val next = "Next"
+    override val tickIngredients = "Tick what went into it."
+    override fun asLastTime(count: Int) = if (count == 1) "As last time: 1 ingredient ticked." else "As last time: $count ingredients ticked."
+    override fun notInPantry(names: String) = "Not in the pantry: $names"
+    override val usedUp = "Used up"
+    override val someLeft = "Some left"
+    override val amountUsed = "Used"
+    override fun cooked(name: String) = "$name made"
+    override val ranOutTitle = "Finished with the recipe"
+    override val putOnListQuestion = "Put them on the shopping list?"
+    override val recipes = "Recipes"
+    override val noRecipes = "No recipes yet. Add recipe, under the pantry, writes one down as you make it."
+    override fun madeTimes(count: Int, last: String?) =
+        (if (count == 1) "made once" else "made $count times") + (last?.let { ", last on $it" } ?: "")
+    override val ingredients = "Ingredients"
+    override val addIngredient = "Add an ingredient"
+    override val makeIt = "Make it"
+    override fun removeIngredient(name: String) = "Remove $name"
+    override fun ingredientOpened(amount: String?) = "opened" + (amount?.let { ", $it" } ?: "")
+    override val whatIsKept = "What goes in the pantry?"
+    override val nothing = "Nothing"
+    override val wholeDish = "All of it, made ahead"
+    override val portions = "Portions"
 
     override fun money(cents: Long) = (if (cents < 0) "-" else "") + "€" + (kotlin.math.abs(cents) / 100) + "." + (kotlin.math.abs(cents) % 100).toString().padStart(2, '0')
     override val decimal = '.'
@@ -661,6 +725,8 @@ object ItalianStrings : Strings {
         is PantryAction.UsedSome -> "consumo di ${action.count} “${action.name}”"
         is PantryAction.Opened -> "apertura di “${action.name}”"
         is PantryAction.UsedAmount -> "consumo di ${measure(action.amount)} di “${action.name}”"
+        is PantryAction.MarkedLeftover -> if (action.leftover) "segnatura di “${action.name}” come avanzi" else "rimozione di “${action.name}” dagli avanzi"
+        is PantryAction.Cooked -> "preparazione di “${action.name}”"
         is PantryAction.AddedPurchase -> "aggiunta del prezzo di “${action.name}”"
         is PantryAction.EditedPurchase -> "modifica del prezzo di “${action.name}”"
         is PantryAction.DeletedPurchase -> "eliminazione del prezzo di “${action.name}”"
@@ -788,6 +854,38 @@ object ItalianStrings : Strings {
     override fun usedAmount(name: String, left: String) = "$name: restano $left"
     override fun totalMatches(total: String) = "Totale $total, come sullo scontrino."
     override fun totalDiffers(sum: String, total: String) = "I prezzi fanno $sum, lo scontrino dice $total: controllali."
+
+    override val leftover = "Avanzi"
+    override fun markLeftover(name: String) = "Segna come avanzi: $name"
+    override fun unmarkLeftover(name: String) = "Non più avanzi: $name"
+    override fun markedLeftover(name: String, leftover: Boolean) = if (leftover) "$name: avanzi" else "$name: non più avanzi"
+    override val addRecipe = "Aggiungi ricetta"
+    override val whatDidYouMake = "Che cosa hai preparato?"
+    override val recipeName = "Ricetta"
+    override val next = "Avanti"
+    override val tickIngredients = "Spunta ciò che hai usato."
+    override fun asLastTime(count: Int) =
+        if (count == 1) "Come l'ultima volta: 1 ingrediente spuntato." else "Come l'ultima volta: $count ingredienti spuntati."
+    override fun notInPantry(names: String) = "Non in dispensa: $names"
+    override val usedUp = "Finita"
+    override val someLeft = "Ne avanza"
+    override val amountUsed = "Usati"
+    override fun cooked(name: String) = "Preparato: $name"
+    override val ranOutTitle = "Finiti con la ricetta"
+    override val putOnListQuestion = "Metterli nella lista della spesa?"
+    override val recipes = "Ricette"
+    override val noRecipes = "Ancora nessuna ricetta. Con Aggiungi ricetta, sotto la dispensa, la registri mentre la prepari."
+    override fun madeTimes(count: Int, last: String?) =
+        (if (count == 1) "preparata una volta" else "preparata $count volte") + (last?.let { ", l'ultima il $it" } ?: "")
+    override val ingredients = "Ingredienti"
+    override val addIngredient = "Aggiungi un ingrediente"
+    override val makeIt = "Preparala"
+    override fun removeIngredient(name: String) = "Togli $name"
+    override fun ingredientOpened(amount: String?) = "aperta" + (amount?.let { ", $it" } ?: "")
+    override val whatIsKept = "Che cosa metti via?"
+    override val nothing = "Niente"
+    override val wholeDish = "Tutto, preparato in anticipo"
+    override val portions = "Porzioni"
 
     override fun money(cents: Long) = (if (cents < 0) "-" else "") + (kotlin.math.abs(cents) / 100) + "," + (kotlin.math.abs(cents) % 100).toString().padStart(2, '0') + " €"
     override val decimal = ','

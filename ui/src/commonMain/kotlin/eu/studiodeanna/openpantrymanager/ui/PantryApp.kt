@@ -64,6 +64,8 @@ fun PantryApp(
                 // Shared by the screens, so a message from one (receipt saved) shows on the next.
                 val snackbars = remember { SnackbarHostState() }
                 var receipt by remember { mutableStateOf<ReceiptReview?>(null) }
+                /** The recipe being made. */
+                var cooking by remember { mutableStateOf<String?>(null) }
                 /** The shopping list's items under review, when [receipt] was made of them rather than read on a receipt. */
                 var fromList by remember { mutableStateOf<List<Item>?>(null) }
                 // Opened from a shortcut: back to the pantry, which searches or listens; or on to the camera.
@@ -82,6 +84,11 @@ fun PantryApp(
                             snackbars,
                             onShopping = { nav.navigate("shopping") },
                             onCosts = { nav.navigate("costs") },
+                            onCook = { name ->
+                                cooking = name
+                                nav.navigate("cook")
+                            },
+                            onRecipes = { nav.navigate("recipes") },
                             onScan = scanner?.let { { nav.navigate("photos") } },
                             voice = voice,
                             reminders = reminders,
@@ -108,6 +115,28 @@ fun PantryApp(
                                 nav.navigate("receipt") { popUpTo("photos") { inclusive = true } }
                             },
                         )
+                    }
+                    composable("cook") {
+                        val name = cooking
+                        if (name == null) {
+                            LaunchedEffect(Unit) { nav.popBackStack() }
+                            return@composable
+                        }
+                        CookScreen(repository, name, onClose = { nav.popBackStack() }) { done ->
+                            // Back on the pantry, which shows the message.
+                            nav.popBackStack("pantry", inclusive = false)
+                            scope.launch {
+                                snackbars.currentSnackbarData?.dismiss()
+                                val result = snackbars.showSnackbar(strings.cooked(name), strings.undo, duration = SnackbarDuration.Long)
+                                if (result == SnackbarResult.ActionPerformed) done.step?.let(repository::undo)
+                            }
+                        }
+                    }
+                    composable("recipes") {
+                        RecipesScreen(repository, onBack = { nav.popBackStack() }) { name ->
+                            cooking = name
+                            nav.navigate("cook")
+                        }
                     }
                     composable("costs") {
                         CostsScreen(repository, onBack = { nav.popBackStack() })

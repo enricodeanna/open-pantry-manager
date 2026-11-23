@@ -63,6 +63,24 @@ finished. Once a food has been finished from an opened box twice, its opened box
 giorni (di solito dura 4 giorni)", is listed by that day rather than its expiry day when that comes
 first, and goes under *Use soon* (and in the reminder) as that day nears.
 
+**Leftovers.** A long press on a food marks it as leftovers ("Avanzi", under its name), and another long
+press unmarks it, with Undo either way. Leftovers are a meal of their own: the same food bought or put
+away later is not counted with them.
+
+**Recipes.** *Add recipe*, above *Add food*, asks what was made, offering the recipes made before as the
+name is typed, then shows the pantry to tick what went into it: for food counted in pieces how many, for
+boxes whether they were used up or some is left (opened, then, and for a box of known size how much was
+used). A recipe made before comes with what it took last time already ticked, as far as the pantry has
+it: the same food, or a like one of its group ("Cottage cheese" for "Fiocchi di latte"), opened boxes
+first, then the one expiring soonest; what is missing is said ("Non in dispensa: Burro"). At the top,
+*What goes in the pantry?* puts the dish away too: nothing, leftovers (marked as such), or all of it made
+ahead (meals for the freezer, say), in the space chosen (where that dish went before is starred), so many
+portions, until a day if said; the next time the recipe is made, the same is offered. Saving takes it all
+from the pantry and puts the dish away in one edit, which one Undo takes back, and learns the recipe as
+made; what ran out (none left unopened) is offered for the shopping list in one go. Menu → *Recipes* lists them, with their
+ingredients and how often and when they were made, to rename, change, delete, write anew, or make from
+there. Recipes are part of what the app learns, so a shared pantry shares them.
+
 **Costs.** What food cost is kept apart from the pantry's lists, in Menu → *Costs*. Prices come from
 receipts (read with them, less the discounts printed under each product, and checked against the
 receipt's total), from the *Add food* dialog (*Price paid, for all*, and the shop), and from putting away
@@ -180,6 +198,7 @@ with the pantry when it is shared:
   how long an opened box of it lasts (the middle of the last five times);
 - the group of like products each food's costs count under, when set by hand;
 - which shop a receipt's top names, as the user called it ("Coop" for "COOP ALLEANZA 3.0");
+- the recipes made or written: their ingredients, how much of each, how often and when they were made;
 - which items of the shopping list, ticked as bought, were put away or let go, so they are not offered
   again;
 - what each food is called on the shopping list ("Latte" for "Latte p.s. Friuli"), and in which sublist;
@@ -256,9 +275,10 @@ and folded spaces stay each phone's own.
 From format 2 (version 0.4.0) items carry the day they were bought, from format 3 (0.6.0) the memory
 carries the phrases taught to voice commands, from format 4 (0.7.0) items come in boxes, opened or not,
 from format 5 (1.0.0) the memory knows how long opened boxes last and which items of the shopping list
-were put away, and from format 6 (1.1.0) boxes have a size and what is left of them, and the memory has
-sizes, servings, groups of products and shops: a phone with an older version refuses the file, asking to
-be updated, rather than dropping them. Every phone sharing a pantry needs updating, then.
+were put away, from format 6 (1.1.0) boxes have a size and what is left of them, and the memory has
+sizes, servings, groups of products and shops, and from format 7 (1.2.0) items can be leftovers and the
+memory has recipes: a phone with an older version refuses the file, asking to be updated, rather than
+dropping them. Every phone sharing a pantry needs updating, then.
 
 The costs are shared too, in a file of their own next to the pantry's (`Dispensa.costs` by
 `Dispensa.pantry`): their history only grows, and the pantry's file, synced at every change, does not

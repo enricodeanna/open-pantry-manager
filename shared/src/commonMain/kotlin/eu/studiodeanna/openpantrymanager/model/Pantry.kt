@@ -18,10 +18,10 @@ data class PantryDocument(
     companion object {
         /**
          * 2: items have the day they were bought. 3: items come in boxes, opened or not. 4: boxes have
-         * a size, and an opened one how much is left. An older app refuses the file rather than dropping
-         * what it does not know.
+         * a size, and an opened one how much is left. 5: items can be leftovers. An older app refuses the
+         * file rather than dropping what it does not know.
          */
-        const val FORMAT = 4
+        const val FORMAT = 5
     }
 }
 
@@ -60,6 +60,8 @@ data class PantryItem(
     val size: Measure? = null,
     /** For opened boxes of a known [size]: how much is left in them, in its unit. */
     val left: Double? = null,
+    /** Leftovers: what is left of a meal, marked by the user, to be eaten first. */
+    val leftover: Boolean = false,
     val added: Long,
     override val at: Long,
     override val by: String,

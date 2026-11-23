@@ -33,6 +33,16 @@ import eu.studiodeanna.openpantrymanager.store.FileStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import eu.studiodeanna.openpantrymanager.Cooked
+import eu.studiodeanna.openpantrymanager.costs.Measure
+import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
+import eu.studiodeanna.openpantrymanager.model.visibleSpaces
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -174,5 +184,87 @@ class PantryScreenTest {
         onNodeWithText("Ignora").performClick()
         onNodeWithText("Hai spuntato 1 prodotto nella lista della spesa.").assertDoesNotExist()
         assertEquals(emptyList(), repository.boughtOnList())
+    }
+
+    @Test
+    fun aLongPressMarksLeftoversAndAnotherUnmarksThem() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        val fridge = repository.addSpace("Frigorifero")
+        repository.addItem("Lasagne", fridge)
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) {
+                    PantryScreen(repository, SnackbarHostState(), onShopping = {}, onScan = {})
+                }
+            }
+        }
+        onNodeWithText("Lasagne").performTouchInput { longClick() }
+        onNodeWithText("Avanzi").assertExists()
+        assertEquals(true, repository.pantry.value.liveItems().single().leftover)
+        onNodeWithText("Lasagne").performTouchInput { longClick() }
+        onNodeWithText("Avanzi").assertDoesNotExist()
+        assertEquals(false, repository.pantry.value.liveItems().single().leftover)
+    }
+
+    @Test
+    fun aRecipeTakesWhatIsTickedAndIsListedToChange() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        val fridge = repository.addSpace("Frigorifero")
+        repository.addItem("Uova", fridge, 6)
+        repository.addItem("Farina", fridge, 1, boxed = true, size = Measure(1000.0, MeasureUnit.Gram))
+        var done: Cooked? = null
+        var screen by mutableStateOf("cook")
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) {
+                    if (screen == "cook") CookScreen(repository, "Crêpes", onClose = {}) { done = it } else RecipesScreen(repository, onBack = {}, onCook = {})
+                }
+            }
+        }
+        onNodeWithText("Salva").assertIsNotEnabled()
+        onNodeWithText("Uova").performClick()
+        onNodeWithContentDescription("Altro").performClick()
+        onNodeWithText("Farina").performClick()
+        // A box ticked is opened, some left; how much went in, typed.
+        onNodeWithText("Usati").performTextInput("250")
+        onNodeWithText("Salva").assertIsEnabled().performClick()
+        // Its only box opened, the flour has run out: with no list linked, nothing is asked.
+        assertEquals(listOf("Farina"), done?.ranOut)
+        val items = repository.pantry.value.liveItems().associateBy { it.name }
+        assertEquals(4, items.getValue("Uova").quantity)
+        assertEquals(750.0, items.getValue("Farina").left)
+
+        // Listed, and renamed.
+        screen = "recipes"
+        onNodeWithText("Crêpes").performClick()
+        onAllNodes(hasSetTextAction()).filterToOne(hasText("Crêpes")).performTextReplacement("Crespelle")
+        onNodeWithText("Salva").performClick()
+        onNodeWithText("Crespelle").assertExists()
+        assertEquals(listOf("Uova", "Farina"), repository.recipe("crespelle")?.ingredients?.map { it.food })
+    }
+
+    @Test
+    fun theDishCanBePutAwayAsLeftoversWhereChosen() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        repository.addSpace("Frigorifero")
+        val freezer = repository.addSpace("Congelatore")
+        repository.addItem("Riso", freezer, 1)
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) { CookScreen(repository, "Risotto", onClose = {}, onDone = {}) }
+            }
+        }
+        onNodeWithText("Riso").performClick()
+        onNodeWithText("Avanzi").performClick()
+        // A place to put it is needed first.
+        onNodeWithText("Salva").assertIsNotEnabled()
+        onNodeWithText("Frigorifero").performClick()
+        onNodeWithText("Salva").assertIsEnabled().performClick()
+        val risotto = repository.pantry.value.liveItems().single { it.name == "Risotto" }
+        assertEquals(true, risotto.leftover)
+        assertEquals("Frigorifero", repository.pantry.value.visibleSpaces().single { it.id == risotto.space }.name)
     }
 }
