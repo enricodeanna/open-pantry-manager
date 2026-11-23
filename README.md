@@ -70,8 +70,9 @@ press unmarks it, with Undo either way. Leftovers are a meal of their own: the s
 away later is not counted with them.
 
 **Recipes.** *Add recipe*, above *Add food*, asks what was made, offering the recipes made before as the
-name is typed, then shows the pantry to tick what went into it: for food counted in pieces how many, for
-boxes whether they were used up or some is left (opened, then, and for a box of known size how much was
+name is typed, then shows the pantry, each space in alphabetical order, with a search field above it that
+stays at hand ("Spuntati:" lists what is ticked, found or not), to tick what went into it: for food
+counted in pieces how many, for boxes whether they were used up or some is left (opened, then, and for a box of known size how much was
 used). A recipe made before comes with what it took last time already ticked, as far as the pantry has
 it: the same food, or a like one of its group ("Cottage cheese" for "Fiocchi di latte"), opened boxes
 first, then the one expiring soonest; what is missing is said ("Non in dispensa: Burro"). At the top,

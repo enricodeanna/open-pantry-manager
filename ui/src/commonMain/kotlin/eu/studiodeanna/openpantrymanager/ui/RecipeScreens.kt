@@ -32,6 +32,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -46,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -66,7 +69,9 @@ import eu.studiodeanna.openpantrymanager.memory.food
 import eu.studiodeanna.openpantrymanager.memory.isBoxed
 import eu.studiodeanna.openpantrymanager.model.PantryItem
 import eu.studiodeanna.openpantrymanager.model.Space
+import eu.studiodeanna.openpantrymanager.model.item
 import eu.studiodeanna.openpantrymanager.model.itemsBySpace
+import eu.studiodeanna.openpantrymanager.model.matchesName
 import eu.studiodeanna.openpantrymanager.model.nameKey
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
 import kotlinx.datetime.LocalDate
@@ -143,7 +148,13 @@ fun CookScreen(repository: PantryRepository, name: String, onClose: () -> Unit, 
     val order = remember { mutableStateListOf<String>().apply { suggestion?.uses?.forEach { add(it.item) } } }
     var cooked by remember { mutableStateOf<Cooked?>(null) }
     val spaces = remember(doc) { doc.visibleSpaces() }
-    val grouped = remember(doc) { doc.itemsBySpace() }
+    // Looked for by name here: each space in alphabetical order, the same food opened first, then soonest to expire.
+    val grouped = remember(doc) {
+        doc.itemsBySpace().mapValues { (_, items) ->
+            items.sortedWith(compareBy({ nameKey(it.name) }, { it.opened == null }, { it.expires == null }, { it.expires }))
+        }
+    }
+    var query by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -168,58 +179,96 @@ fun CookScreen(repository: PantryRepository, name: String, onClose: () -> Unit, 
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-            LazyColumn(Modifier.widthIn(max = 640.dp).fillMaxWidth(), contentPadding = PaddingValues(bottom = 48.dp)) {
-                item(key = "intro") {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(strings.tickIngredients, style = MaterialTheme.typography.bodyMedium)
-                        if (suggestion != null && suggestion.uses.isNotEmpty()) {
-                            Text(strings.asLastTime(suggestion.uses.size), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                        }
-                        if (suggestion != null && suggestion.missing.isNotEmpty()) {
+            Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
+                // Above the list, so it stays at hand however far the list scrolls.
+                TextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text(strings.searchFood) },
+                    leadingIcon = { Icon(AppIcons.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(AppIcons.Close, contentDescription = strings.clearSearch) }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                )
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 48.dp)) {
+                    if (picked.isNotEmpty()) {
+                        item(key = "ticked") {
+                            val texts = strings
                             Text(
-                                strings.notInPantry(suggestion.missing.joinToString(", ") { it.food }),
+                                texts.ticked(order.mapNotNull { id -> picked[id]?.let { use -> doc.item(id)?.let { texts.useText(it, use) } } }.joinToString(", ")),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.tertiary,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
                             )
                         }
                     }
-                }
-                item(key = "kept") {
-                    KeptCard(
-                        leftover = keptLeftover,
-                        onKind = { keptLeftover = it },
-                        spaces = spaces,
-                        space = space,
-                        usual = usual,
-                        onSpace = { space = it },
-                        portions = portions,
-                        onPortions = { portions = it },
-                        expires = expires,
-                        today = today,
-                        keepsDays = repository.food(name)?.keepsDays,
-                        onExpires = { expires = it },
-                    )
-                }
-                for (space in spaces) {
-                    val items = grouped[space.id].orEmpty()
-                    if (items.isEmpty()) continue
-                    item(key = "space-${space.id}") {
-                        Text(
-                            space.name,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-                        )
-                        HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                    if (query.isBlank()) item(key = "intro") {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(strings.tickIngredients, style = MaterialTheme.typography.bodyMedium)
+                            if (suggestion != null && suggestion.uses.isNotEmpty()) {
+                                Text(strings.asLastTime(suggestion.uses.size), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                            }
+                            if (suggestion != null && suggestion.missing.isNotEmpty()) {
+                                Text(
+                                    strings.notInPantry(suggestion.missing.joinToString(", ") { it.food }),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
+                        }
                     }
-                    items(items, key = { it.id }) { item ->
-                        IngredientRow(item, today, picked[item.id]) { use ->
-                            if (use == null) {
-                                picked.remove(item.id)
-                                order.remove(item.id)
-                            } else {
-                                if (item.id !in picked) order += item.id
-                                picked[item.id] = use
+                    if (query.isBlank()) item(key = "kept") {
+                        KeptCard(
+                            leftover = keptLeftover,
+                            onKind = { keptLeftover = it },
+                            spaces = spaces,
+                            space = space,
+                            usual = usual,
+                            onSpace = { space = it },
+                            portions = portions,
+                            onPortions = { portions = it },
+                            expires = expires,
+                            today = today,
+                            keepsDays = repository.food(name)?.keepsDays,
+                            onExpires = { expires = it },
+                        )
+                    }
+                    val found = spaces.associateWith { space -> grouped[space.id].orEmpty().filter { query.isBlank() || matchesName(it.name, query) } }
+                    if (found.values.all { it.isEmpty() } && query.isNotBlank()) {
+                        item(key = "none") {
+                            Text(
+                                strings.noFoodMatches(query),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(24.dp),
+                            )
+                        }
+                    }
+                    for (space in spaces) {
+                        val items = found[space].orEmpty()
+                        if (items.isEmpty()) continue
+                        item(key = "space-${space.id}") {
+                            Text(
+                                space.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                            )
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                        }
+                        items(items, key = { it.id }) { item ->
+                            IngredientRow(item, today, picked[item.id]) { use ->
+                                if (use == null) {
+                                    picked.remove(item.id)
+                                    order.remove(item.id)
+                                } else {
+                                    if (item.id !in picked) order += item.id
+                                    picked[item.id] = use
+                                }
                             }
                         }
                     }
@@ -314,6 +363,15 @@ private fun IngredientRow(item: PantryItem, today: LocalDate, use: RecipeUse?, o
                 }
             }
         }
+    }
+}
+
+/** What of an item goes into the recipe: "Uova ×2", "Farina (aperta, 250 g)", "Latte". */
+private fun Strings.useText(item: PantryItem, use: RecipeUse): String = buildString {
+    append(item.name)
+    if (use.quantity > 1) append(" ×").append(use.quantity)
+    if (item.boxed && !use.whole) {
+        append(" (").append(ingredientOpened(use.amount?.let { a -> item.size?.let { measure(Measure(a, it.unit)) } })).append(")")
     }
 }
 

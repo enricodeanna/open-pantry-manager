@@ -161,6 +161,8 @@ interface Strings {
     val recipeName: String
     val next: String
     val tickIngredients: String
+    /** What is ticked so far for a recipe: "Uova ×2, Farina". */
+    fun ticked(names: String): String
     fun asLastTime(count: Int): String
     fun notInPantry(names: String): String
     val usedUp: String
@@ -504,6 +506,7 @@ object EnglishStrings : Strings {
     override val recipeName = "Recipe"
     override val next = "Next"
     override val tickIngredients = "Tick what went into it."
+    override fun ticked(names: String) = "Ticked: $names"
     override fun asLastTime(count: Int) = if (count == 1) "As last time: 1 ingredient ticked." else "As last time: $count ingredients ticked."
     override fun notInPantry(names: String) = "Not in the pantry: $names"
     override val usedUp = "Used up"
@@ -868,6 +871,7 @@ object ItalianStrings : Strings {
     override val recipeName = "Ricetta"
     override val next = "Avanti"
     override val tickIngredients = "Spunta ciò che hai usato."
+    override fun ticked(names: String) = "Spuntati: $names"
     override fun asLastTime(count: Int) =
         if (count == 1) "Come l'ultima volta: 1 ingrediente spuntato." else "Come l'ultima volta: $count ingredienti spuntati."
     override fun notInPantry(names: String) = "Non in dispensa: $names"

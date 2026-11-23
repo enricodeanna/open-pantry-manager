@@ -289,5 +289,30 @@ class PantryScreenTest {
         onNode(hasSetTextAction()).performTextInput("cereali")
         onNodeWithContentDescription("In confezione: sì").assertExists()
     }
+
+    @Test
+    fun theRecipesIngredientsAreFoundBySearching() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        val fridge = repository.addSpace("Frigorifero")
+        repository.addItem("Uova", fridge, 6)
+        repository.addItem("Farina", fridge, 1)
+        repository.addItem("Zucchine", fridge, 3)
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) { CookScreen(repository, "Frittata", onClose = {}, onDone = {}) }
+            }
+        }
+        onAllNodes(hasSetTextAction()).filterToOne(hasText("Cerca un alimento")).performTextInput("zucc")
+        onNodeWithText("Uova").assertDoesNotExist()
+        onNodeWithText("Zucchine").performClick()
+        // The search cleared, all the pantry again, and what is ticked said above it.
+        onNodeWithContentDescription("Cancella").performClick()
+        onNodeWithText("Uova").performClick()
+        onNodeWithText("Spuntati: Zucchine, Uova").assertExists()
+        onNodeWithText("Nessun alimento si chiama “burro”.").assertDoesNotExist()
+        onAllNodes(hasSetTextAction()).filterToOne(hasText("Cerca un alimento")).performTextInput("burro")
+        onNodeWithText("Nessun alimento si chiama “burro”.").assertExists()
+    }
 }
 
