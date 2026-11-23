@@ -62,6 +62,8 @@ private data class ReviewRow(
     val reviewed: Boolean = false,
     /** The user set the expiry day, which stays when the day of purchase changes. */
     val expiryPicked: Boolean = false,
+    /** The user said whether it comes in boxes, which stays when the food's name changes. */
+    val boxedPicked: Boolean = false,
 ) {
     /** Still as the app guessed, for a line it did not know for sure, and not looked at yet. */
     val unsure get() = entry.recognition in setOf(Recognition.Unknown, Recognition.Probable) && entry.name == guessed && !reviewed
@@ -276,7 +278,9 @@ private fun ReceiptRowCard(
                         editing = true
                         onChange {
                             val space = if (it.spacePicked) it.entry.space else repository.placeFor(name) ?: it.entry.space
-                            it.copy(entry = it.entry.copy(name = name, space = space))
+                            // Another food: in boxes as that one came last time, unless said here.
+                            val boxed = if (it.boxedPicked) it.entry.boxed else repository.food(name)?.boxed == true
+                            it.copy(entry = it.entry.copy(name = name, space = space, boxed = boxed))
                         }
                     },
                     label = { Text(strings.food) },
@@ -297,12 +301,14 @@ private fun ReceiptRowCard(
                                 onChange {
                                     val space = if (it.spacePicked) it.entry.space else repository.placeFor(food.name) ?: it.entry.space
                                     val keeps = food.keepsDays?.let { days -> from.plus(DatePeriod(days = days)) }
-                                    it.copy(entry = it.entry.copy(name = food.name, space = space, expires = it.entry.expires ?: keeps))
+                                    val boxed = if (it.boxedPicked) it.entry.boxed else food.boxed == true
+                                    it.copy(entry = it.entry.copy(name = food.name, space = space, expires = it.entry.expires ?: keeps, boxed = boxed))
                                 }
                             }.padding(vertical = 6.dp),
                         )
                     }
                 }
+                CheckRow(strings.inBoxes, entry.boxed) { boxed -> onChange { it.copy(entry = it.entry.copy(boxed = boxed), boxedPicked = true) } }
                 SpaceChips(spaces, entry.space, usual = repository.placeFor(entry.name), onNewSpace = onNewSpace) { space ->
                     onChange { it.copy(entry = it.entry.copy(space = space), spacePicked = true) }
                 }

@@ -597,4 +597,25 @@ class PantryRepositoryTest {
         assertEquals(listOf("Pasta"), repo.recipe("Lasagne")?.ingredients?.map { it.food })
         assertEquals(2, repo.recipe("Lasagne")?.made)
     }
+
+    @Test
+    fun aReceiptSaysWhatComesInBoxesAndTheAppRemembers() = runTest {
+        val repo = repository()
+        repo.load()
+        val cabinet = repo.addSpace("Cabinet")
+        fun read() = repo.understandReceipt(
+            listOf(listOf(OcrLine("BISCOTTI FROLLINI 700G", 10f, 100f, 400f, 130f), OcrLine("2,69", 600f, 100f, 680f, 130f))),
+        ).entries.single()
+        val first = read()
+        assertEquals(false, first.boxed)
+        repo.saveReceipt(listOf(first.copy(name = "Biscotti", space = cabinet, boxed = true)))
+        assertEquals(true to Measure(700.0, MeasureUnit.Gram), repo.pantry.value.liveItems().single().let { it.boxed to it.size })
+        // The next receipt knows, as does the quick field.
+        assertEquals(true, read().boxed)
+        assertEquals(true, repo.food("Biscotti")?.boxed)
+        // Said otherwise, remembered otherwise.
+        repo.saveReceipt(listOf(read().copy(space = cabinet, boxed = false)))
+        assertEquals(false, repo.food("Biscotti")?.boxed)
+        assertEquals(false, read().boxed)
+    }
 }

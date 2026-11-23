@@ -32,6 +32,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -422,7 +423,8 @@ fun PantryScreen(
             )
         },
         floatingActionButton = {
-            if (spaces.isNotEmpty() && query == null) {
+            // Not while food is typed in a space: they would cover the field's end, where its buttons are.
+            if (spaces.isNotEmpty() && query == null && adding == null) {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     if (voice != null && voiceLanguage != null) {
                         SmallFloatingActionButton(onClick = { dialog = Dialog.Voice }) {
@@ -545,7 +547,8 @@ fun PantryScreen(
                                     open = adding == id,
                                     onOpen = { adding = id },
                                     onClose = { if (adding == id) adding = null },
-                                    onAdd = { text -> repository.addItem(text, id) },
+                                    isBoxed = { text -> repository.food(text)?.boxed == true },
+                                    onAdd = { text, boxed -> repository.addItem(text, id, boxed = boxed) },
                                     modifier = Modifier.padding(start = SECTION_INDENT),
                                 )
                             }
@@ -1082,13 +1085,18 @@ private fun SpaceHeader(
     }
 }
 
-/** A collapsed "Add food" button that opens into a field; Enter adds and keeps it open for the next one. */
+/**
+ * A collapsed "Add food" button that opens into a field; Enter adds and keeps it open for the next one.
+ * Its box toggle says whether the food comes in boxes: as that food came last time ([isBoxed]), until
+ * tapped; the app remembers it for next time.
+ */
 @Composable
 private fun AddItemRow(
     open: Boolean,
     onOpen: () -> Unit,
     onClose: () -> Unit,
-    onAdd: (String) -> Unit,
+    isBoxed: (String) -> Boolean,
+    onAdd: (text: String, boxed: Boolean?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (!open) {
@@ -1099,10 +1107,14 @@ private fun AddItemRow(
         return
     }
     var text by remember { mutableStateOf("") }
+    /** Set by a tap on the toggle, for the food being typed; null: as that food came last time. */
+    var picked by remember { mutableStateOf<Boolean?>(null) }
+    val boxed = picked ?: remember(text) { isBoxed(text) }
     val focus = remember { FocusRequester() }
     fun submit() {
-        if (text.isNotBlank()) onAdd(text.trim())
+        if (text.isNotBlank()) onAdd(text.trim(), picked)
         text = ""
+        picked = null
     }
     TextField(
         value = text,
@@ -1112,7 +1124,16 @@ private fun AddItemRow(
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { if (text.isBlank()) onClose() else submit() }),
         trailingIcon = {
-            IconButton(onClick = onClose) { Icon(AppIcons.Close, contentDescription = strings.doneAdding) }
+            Row {
+                IconToggleButton(checked = boxed, onCheckedChange = { picked = it }) {
+                    Icon(
+                        AppIcons.Box,
+                        contentDescription = strings.boxToggle(boxed),
+                        tint = if (boxed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                    )
+                }
+                IconButton(onClick = onClose) { Icon(AppIcons.Close, contentDescription = strings.doneAdding) }
+            }
         },
         colors = TextFieldDefaults.colors(
             focusedContainerColor = Color.Transparent,

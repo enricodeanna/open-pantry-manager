@@ -43,7 +43,9 @@ one takes the food out of the pantry. Food to use within three days, or already 
 under **Use soon** at the top.
 
 **Boxes.** Food used a little at a time (cookies, cereals, coffee) can be marked *Comes in a box or
-packet* when it is added or edited; the app remembers it for that food, from receipts too. Its number
+packet* wherever it is put in the pantry: in the *Add food* dialog, by the box button at the end of a
+space's quick field (brown when on), on each row of a receipt's review, or later in its edit dialog. The
+app remembers it for that food, either way, and offers it so next time. Its number
 sits in a square instead of a circle. The first tap opens a box: an opened box is listed on its own row,
 with the same name and expiry, a square without its lid, and "Opened today", "Opened 3 days ago" under its
 name, before the closed ones. The next tap on it means it is finished. Boxes of a food opened the same day

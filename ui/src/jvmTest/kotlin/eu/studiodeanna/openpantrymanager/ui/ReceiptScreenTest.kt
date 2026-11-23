@@ -94,4 +94,23 @@ class ReceiptScreenTest {
         val purchase = repository.costs.value.livePurchases().single()
         assertEquals(Triple(139L, "Conad", Measure(1000.0, MeasureUnit.Millilitre)), Triple(purchase.cents, purchase.shop, purchase.amount))
     }
+
+    @Test
+    fun aRowOfTheReceiptCanSayItComesInABox() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        val cabinet = repository.addSpace("Cabinet")
+        val review = repository.understandReceipt(
+            listOf(listOf(OcrLine("CEREALI MUESLI 375G", 10f, 100f, 400f, 130f), OcrLine("3,19", 600f, 100f, 680f, 130f))),
+        ).let { it.copy(entries = it.entries.map { e -> e.copy(space = cabinet) }) }
+        setContent {
+            CompositionLocalProvider(LocalStrings provides EnglishStrings) {
+                ReceiptScreen(repository, review, onBack = {}, onSaved = { _, _ -> })
+            }
+        }
+        onNodeWithText("Comes in a box or packet").performClick()
+        onNodeWithText("Save").performClick()
+        assertEquals(true, repository.pantry.value.liveItems().single().boxed)
+    }
 }
+

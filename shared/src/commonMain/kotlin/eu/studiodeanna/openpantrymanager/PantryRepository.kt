@@ -782,6 +782,8 @@ class PantryRepository(
                 space = memory.placeFor(name, spaces),
                 expires = food?.keepsDays?.let { bought.plus(DatePeriod(days = it)) },
                 include = true,
+                size = food?.size,
+                boxed = food?.boxed == true,
             )
         }
     }
@@ -804,8 +806,8 @@ class PantryRepository(
 
     /**
      * Puts the included entries in the pantry, and what was paid for them, at [shop], in the costs; learns
-     * where each goes, how long it keeps and how big its box is; [fromReceipt], also what each receipt line
-     * is, and that lines left out are not for the pantry; and what [also] says.
+     * where each goes, how long it keeps, whether it comes in boxes and how big; [fromReceipt], also what
+     * each receipt line is, and that lines left out are not for the pantry; and what [also] says.
      */
     private fun putAway(
         entries: List<ReceiptEntry>,
@@ -816,14 +818,10 @@ class PantryRepository(
     ): Pair<UndoStep?, Int> {
         val spaces = liveSpaces()
         val kept = entries.filter { it.include && it.name.isNotBlank() && it.space in spaces }
-        val known = _memory.value
         val count = kept.sumOf { it.quantity }
         val action = if (fromReceipt) PantryAction.PutAway(count) else PantryAction.PutAwayFromList(count)
         val step = edit(action, { doc ->
-            kept.fold(doc) { d, e ->
-                val boxed = known.isBoxed(e.name)
-                editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought, boxed, e.size.takeIf { boxed }).first
-            }
+            kept.fold(doc) { d, e -> editor.addItem(d, e.name, e.space!!, e.quantity, e.expires, bought, e.boxed, e.size.takeIf { e.boxed }).first }
         }, buy = { costs ->
             kept.fold(costs) { c, e ->
                 val price = e.price ?: return@fold c
@@ -839,6 +837,8 @@ class PantryRepository(
                         val pack = if (e.quantity % e.line.quantity == 0) e.quantity / e.line.quantity else 1
                         val placed = (if (printed) m.receiptMeans(e.line.text, e.name, pack) else m)
                             .placed(e.name, e.space!!, now(), today(), e.expires, bought)
+                            // In boxes or not, as said in the review: so next time.
+                            .boxed(e.name, e.boxed)
                         e.size?.let { placed.sized(e.name, it) } ?: placed
                     }
                     !e.include && printed -> m.receiptSkips(e.line.text)

@@ -43,6 +43,7 @@ import eu.studiodeanna.openpantrymanager.Cooked
 import eu.studiodeanna.openpantrymanager.costs.Measure
 import eu.studiodeanna.openpantrymanager.costs.MeasureUnit
 import eu.studiodeanna.openpantrymanager.model.visibleSpaces
+import androidx.compose.ui.test.performImeAction
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -267,4 +268,26 @@ class PantryScreenTest {
         assertEquals(true, risotto.leftover)
         assertEquals("Frigorifero", repository.pantry.value.visibleSpaces().single { it.id == risotto.space }.name)
     }
+
+    @Test
+    fun theQuickFieldSaysWhatComesInBoxesAndRemembers() = runComposeUiTest {
+        val repository = PantryRepository(MemoryStore(), CoroutineScope(Dispatchers.Default))
+        runBlocking { repository.load() }
+        repository.addSpace("Credenza")
+        setContent {
+            CompositionLocalProvider(LocalStrings provides ItalianStrings) {
+                Box(Modifier.size(387.dp, 800.dp)) { PantryScreen(repository, SnackbarHostState(), onShopping = {}, onScan = {}) }
+            }
+        }
+        onNodeWithText("Aggiungi qui").performClick()
+        onNode(hasSetTextAction()).performTextInput("Cereali")
+        onNodeWithContentDescription("In confezione: no").performClick()
+        onNode(hasSetTextAction()).performImeAction()
+        assertEquals(true, repository.pantry.value.liveItems().single().boxed)
+        assertEquals(true, repository.food("Cereali")?.boxed)
+        // Typed again, it comes in boxes by itself.
+        onNode(hasSetTextAction()).performTextInput("cereali")
+        onNodeWithContentDescription("In confezione: sì").assertExists()
+    }
 }
+

@@ -25,8 +25,9 @@ enum class Recognition {
 
 /**
  * A receipt line as the app understood it, ready for the user to check: what food it is, how many,
- * where it goes and, for foods whose keeping time it has learned, until when they keep; what was paid
- * for them all ([price]), what one of them holds ([size]), and for food sold by weight what it weighed.
+ * where it goes and, for foods whose keeping time it has learned, until when they keep; whether it comes
+ * in boxes ([boxed], as last time); what was paid for them all ([price]), what one of them holds
+ * ([size]), and for food sold by weight what it weighed.
  */
 data class ReceiptEntry(
     val line: ReceiptLine,
@@ -39,6 +40,7 @@ data class ReceiptEntry(
     val price: Double? = line.price,
     val size: Measure? = null,
     val weighed: Measure? = line.kilograms?.let { Measure(it * 1000, MeasureUnit.Gram) },
+    val boxed: Boolean = false,
 )
 
 object Recognizer {
@@ -83,6 +85,7 @@ object Recognizer {
             include = recognition != Recognition.Skipped,
             // What the line prints ("YOGURT 500G") is this time's size; else the one the food had before.
             size = sizeIn(line.text) ?: food?.size,
+            boxed = food?.boxed == true,
         )
     }
 

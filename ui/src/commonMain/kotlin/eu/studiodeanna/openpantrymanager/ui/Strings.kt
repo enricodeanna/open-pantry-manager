@@ -127,6 +127,8 @@ interface Strings {
     val starMeansUsual: String
     fun allOf(count: Int): String
     val inBoxes: String
+    /** The quick field's toggle: food added from it comes in boxes, or not. */
+    fun boxToggle(on: Boolean): String
     val inBoxesHelp: String
     val boxOpened: String
     /** What one box holds. */
@@ -474,6 +476,7 @@ object EnglishStrings : Strings {
     override val starMeansUsual = "★ is where it usually goes from here."
     override fun allOf(count: Int) = "All $count"
     override val inBoxes = "Comes in a box or packet"
+    override fun boxToggle(on: Boolean) = if (on) "In a box or packet: yes" else "In a box or packet: no"
     override val inBoxesHelp = "Tapping its number opens one; the next tap finishes it, or, with what one holds given, asks how much you used."
     override val boxOpened = "Opened"
     override val packageSize = "One holds"
@@ -836,6 +839,7 @@ object ItalianStrings : Strings {
     override val starMeansUsual = "★ è dove va di solito da qui."
     override fun allOf(count: Int) = "Tutti e $count"
     override val inBoxes = "In confezione (scatola, pacco…)"
+    override fun boxToggle(on: Boolean) = if (on) "In confezione: sì" else "In confezione: no"
     override val inBoxesHelp =
         "Toccando il numero si apre una confezione; il tocco dopo la segna come finita o, se ne dai il contenuto, chiede quanto ne hai usato."
     override val boxOpened = "Aperta"
